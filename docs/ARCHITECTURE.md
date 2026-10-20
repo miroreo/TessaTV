@@ -4,7 +4,7 @@ This is the living reference for TessaTV's design and plan. It started as a plan
 doc before any code existed; it's now kept in the repo so decisions and status don't
 live only in chat history.
 
-## Status (as of 2026-10-19)
+## Status (as of 2026-10-20)
 
 Repo: https://github.com/miroreo/TessaTV (private).
 
@@ -35,30 +35,33 @@ Repo: https://github.com/miroreo/TessaTV (private).
   auto-merged), then confirmed explicitly: one node survives with both seasons' full
   episode counts intact, and re-running the sweep afterward finds nothing left to merge.
   This also caught a second real bug — see "Non-obvious implementation notes".
-- ⬜ **M3 — Streaming + Jellyfin-compat phases 1–2.** Not started yet, but scoped.
-  Sequencing decided: build `streaming` first (self-contained, verifiable with real
-  ffmpeg/ffprobe against real library files, no client needed), *then*
-  `jellyfin-compat` on top of a working playback engine. Live client testing is the plan
+- 🔄 **M3 — Streaming + Jellyfin-compat phases 1–2.** In progress. Sequencing decided:
+  build `streaming` first (self-contained, verifiable with real ffmpeg/ffprobe against real
+  library files, no client needed), *then* `jellyfin-compat` on top of a working playback
+  engine. **`packages/streaming` is built** (see "Streaming subsystem" below): ffprobe
+  probing, `resolvePlaybackPlan`, ffmpeg HLS `TranscodeSession`, and a `HardwareAccel`
+  strategy with `none`/`vaapi` implemented. Live-verified on this machine: ffprobe parses
+  2124/2125 real library files (the one failure is a genuinely 0-byte file on disk), and
+  remux + software transcode + VAAPI transcode all succeed on a representative sample
+  (HEVC 8/10-bit, AV1 10-bit + Opus, Hi10P H.264, XviD AVI, PGS-subtitled BluRay) — VAAPI
+  encodes ~1.7–3.5× faster than software with first playlist ready in ~0.4–1.0s. Not yet
+  wired into `apps/server`. **Next: `jellyfin-compat`.** Live client testing is the plan
   for the compat phase: the dev server's `PORT` was moved to **8080** (still binds
   `0.0.0.0`) specifically so the official Jellyfin iOS app can connect to this machine
   over LAN (`http://10.8.128.8:8080`) or Tailscale (`http://100.97.251.108:8080`) as each
   phase lands — update these addresses if they've changed. `apps/web`'s Vite proxy was
   updated to match (`/api` → `localhost:8080`). This machine has a real AMD iGPU with
-  VAAPI support (`/dev/dri/renderD128` present, confirmed via `ffmpeg -hwaccels` and
-  `lspci`) — plan is to scope the `HardwareAccel` strategy to `none`/`vaapi` for now
-  (actually verifiable here) rather than guess at NVENC/QSV blind, structured so those
-  slot in later without changing the abstraction. Nothing has been built yet — a prior
-  attempt at scaffolding `packages/streaming` in this session was reverted (package.json
-  + tsconfig.json only, no source files, would have broken `tsc -b`) rather than leaving
-  a non-building package committed; start that package fresh next session.
+  VAAPI support (`/dev/dri/renderD128`) — the `HardwareAccel` strategy is scoped to
+  `none`/`vaapi` for now (actually verifiable here) rather than guessing at NVENC/QSV
+  blind, structured so those slot in later without changing the abstraction.
 - ⬜ **M4 — Acquisition pipeline, first protocol.** Not started.
 - ⬜ **M5 — Second protocol adapter.** Not started.
 - ⬜ **M6 — Deeper Jellyfin-compat coverage.** Not started.
 - ⬜ **M7 (stretch) — second media type (Music).** Not started.
 
 Packages that exist today: `domain`, `persistence`, `config`, `library`, `metadata`
-(TMDB + TheTVDB), `jobs`, `apps/server`, `apps/web`. Not yet built: `indexers`,
-`download-clients`, `acquisition`, `streaming`, `jellyfin-compat`, `shared`.
+(TMDB + TheTVDB), `jobs`, `streaming`, `apps/server`, `apps/web`. Not yet built:
+`indexers`, `download-clients`, `acquisition`, `jellyfin-compat`, `shared`.
 
 ## Context
 
@@ -315,15 +318,41 @@ and by which indexer/download-client instances are enabled; it has no protocol- 
 media-type-specific branches. M4/M5 in the roadmap below exist specifically to prove this
 holds when the second protocol is added.
 
-### Streaming subsystem (not yet built)
+### Streaming subsystem (built — not yet wired into the server)
 
-`streaming` exposes `resolvePlaybackPlan(mediaFile, clientCapabilities)` and
-`startTranscodeSession(plan)` using generic `ClientCapabilities`/`PlaybackPlan` shapes —
-not Jellyfin's `DeviceProfile`/`PlaybackInfoResponse`. `jellyfin-compat` translates at the
-boundary in both directions. Hardware-accel is a `HardwareAccel` strategy (none/VAAPI/
-NVENC/QSV) selected via config/auto-detection, changing only the FFmpeg args produced by
-the same `TranscodeSession` abstraction — built in from the streaming milestone, not bolted
-on later.
+`packages/streaming` deliberately knows nothing about Jellyfin; `jellyfin-compat` translates
+`DeviceProfile`/`PlaybackInfoResponse` to and from these shapes at its boundary. Pipeline:
+
+1. `probeMedia(path)` runs ffprobe and maps it to a `MediaProbe` (normalized container,
+   per-stream codec/profile/bit depth/HDR flag/absolute stream index, text vs image
+   subtitles; embedded cover art is dropped from `videoStreams`).
+2. `resolvePlaybackPlan(probe, clientCapabilities, options)` — pure — returns
+   `direct-play` (serve the file), `remux` (copy video into HLS, audio copied or
+   re-encoded), or `transcode` (re-encode video), plus generic `TranscodeReason`s for why
+   direct play wasn't possible. It takes a `MediaProbe` rather than a domain `MediaFile`
+   so it stays pure; the caller probes first. It prefers an HLS segment container that can
+   carry the source video as-is (HEVC/AV1 copy needs fMP4) before falling back to a
+   transcode; bitrate is capped to the client's budget minus audio and never inflated
+   above the source's own bitrate.
+3. `startTranscodeSession(plan, { accel, directory, startTimeSeconds })` spawns one ffmpeg
+   writing `index.m3u8` + segments into `directory`, exposing `-progress`-parsed
+   `progress`, `waitForPlaylist()`, `stop()` (SIGTERM → SIGKILL), `dispose()` (stop +
+   delete output) and a never-rejecting `done`.
+
+Hardware accel is a `HardwareAccel` strategy whose only job is producing a `VideoPipeline`
+(pre-`-i` args, `-vf` chain, encoder args); stream mapping, keyframe alignment and HLS
+muxing live once in `buildTranscodeArgs` and are shared by every strategy.
+`selectHardwareAccel(mode)` resolves `auto`/`none`/`vaapi`: `auto` silently falls back to
+software, an explicit `vaapi` that doesn't work throws. Adding NVENC/QSV = add to the
+`HardwareAccelKind` union, one new strategy class, and a branch in `selectHardwareAccel`
+— nothing else changes. `VaapiAccel` falls back per request: hardware decode only when
+the GPU supports that codec **and** bit depth, otherwise software decode + `hwupload`;
+target codecs the GPU can't encode are delegated wholesale to the software strategy.
+
+`streaming`'s tests include one integration file (`ffmpeg.integration.test.ts`) that runs
+real ffmpeg on a lavfi-synthesized 10-bit HEVC + 5.1 AC-3 sample (remux, software
+transcode, and VAAPI transcode when a working device is detected) — it skips when ffmpeg
+isn't on `PATH`, so run tests inside `nix develop`.
 
 ### Jellyfin compatibility layer (not yet built)
 
@@ -354,8 +383,7 @@ Reordered from the original acquisition-first sequence per an earlier decision t
 watchable player working sooner, before both acquisition protocols are complete:
 
 - **M1 — Core domain + persistence + manual library + minimal UI.** ✅ Done.
-- **M2 — Metadata.** 🔄 In progress. TMDB adapter done and verified live; TheTVDB adapter
-  next.
+- **M2 — Metadata.** ✅ Done.
 - **M3 — Streaming + Jellyfin-compat phases 1–2.** `streaming`'s `PlaybackPlan`/
   `TranscodeSession` (including hardware-accel strategy selection), plus compat-layer auth,
   browse, images, direct play, transcode negotiation, and HLS delivery — enough for the
@@ -381,7 +409,9 @@ watchable player working sooner, before both acquisition protocols are complete:
   cases).
 - **M2** 🔄: TMDB search/identify/cache verified live against a real imported movie,
   confirmed persisted in Postgres. TheTVDB verification pending that adapter's build.
-- **M3**: connect the official Jellyfin iOS app to the running server, authenticate, browse
+- **M3** 🔄: `streaming` verified against real ffmpeg/ffprobe and real library files
+  (probe sweep over the whole library; remux/software/VAAPI sessions on a representative
+  sample). Remaining: Jellyfin iOS app to the running server, authenticate, browse
   the library, and play a file via both direct play and a forced-transcode path (including
   a hardware-accel path if test hardware supports it).
 - **M4/M5**: for each protocol, configure a real (or sandboxed/test) indexer + download
@@ -485,6 +515,18 @@ turbo run test` fails only on that one file.
   whether the affected tables can just be emptied first (dev data, nothing externally
   referenced) rather than engineering a backfill — `TRUNCATE ... CASCADE` then migrate is
   simpler and more honest than a default value that's wrong for already-written rows.
+- VAAPI capability detection runs tiny real encodes/decodes against the device at startup
+  (~0.6s here) instead of trusting `ffmpeg -encoders`/`-hwaccels` (which only list what was
+  *compiled in*, not what this GPU/driver can do) or a per-vendor table. On this AMD iGPU:
+  encode H.264/HEVC/AV1; decode H.264 8-bit, HEVC 8/10, AV1 8/10, VP9 8/10 — **not**
+  10-bit H.264 (Hi10P anime) or MPEG-2/MPEG-4 (XviD), which correctly get software decode +
+  hardware encode. Decode support must be matched on codec *and* bit depth together.
+- No HDR tone-mapping yet: `MediaProbe` flags PQ/HLG sources (`isHdr`) but both strategies
+  just convert to 8-bit SDR, which will look washed out. The current library has zero HDR
+  files, so this is unverifiable here for now — revisit when HDR content exists
+  (`tonemap_vaapi` / zscale+tonemap).
+- Subtitles are dropped from HLS output (`-sn`) for now; text-sub delivery (WebVTT) and
+  image-sub burn-in are compat-phase work.
 - `DrizzleLibraryRepository.updateNode`'s SQL `SET` clause only listed the fields that had
   ever needed updating *so far* (title, sortTitle, monitored, qualityProfileId) — it
   silently dropped `parentId`, because no feature before series-merging ever needed to
