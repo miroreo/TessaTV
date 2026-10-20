@@ -31,6 +31,7 @@ class InMemoryLibraryRepository implements LibraryRepository {
   }
   async createNode() {}
   async updateNode() {}
+  async deleteNode() {}
   async getUnit(id: string) {
     return this.units.find((unit) => unit.id === id) ?? null;
   }

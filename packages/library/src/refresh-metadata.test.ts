@@ -14,6 +14,7 @@ class InMemoryLibraryRepository implements LibraryRepository {
   }
   async createNode() {}
   async updateNode() {}
+  async deleteNode() {}
   async getUnit() {
     return null;
   }

@@ -47,6 +47,7 @@ export class DrizzleLibraryRepository implements LibraryRepository {
     await this.db
       .update(libraryNodeTable)
       .set({
+        parentId: node.parentId,
         title: node.title,
         sortTitle: node.sortTitle,
         monitored: node.monitored,
@@ -55,6 +56,11 @@ export class DrizzleLibraryRepository implements LibraryRepository {
       })
       .where(eq(libraryNodeTable.id, node.id));
     await replaceExternalIds(this.db, "library_node", node.id, node.externalIds);
+  }
+
+  async deleteNode(id: string): Promise<void> {
+    await replaceExternalIds(this.db, "library_node", id, []);
+    await this.db.delete(libraryNodeTable).where(eq(libraryNodeTable.id, id));
   }
 
   async getUnit(id: string): Promise<Unit | null> {

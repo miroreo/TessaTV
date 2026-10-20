@@ -23,7 +23,9 @@ async function findChildBySourceKey(
   return children.find((child) => child.sourceKey === sourceKey) ?? null;
 }
 
-async function findEpisodeNodeBySequence(
+/** Exported for reuse by `merge-duplicate-series.ts`, which needs the same "does this
+ * episode already exist under this season" check when reconciling two merged sources. */
+export async function findEpisodeNodeBySequence(
   repository: LibraryRepository,
   seasonNodeId: string,
   season: number,

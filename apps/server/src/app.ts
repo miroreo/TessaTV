@@ -2,6 +2,7 @@ import type { LibraryRepository } from "@tessatv/domain";
 import type { MetadataProvidersByKind } from "@tessatv/library";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerLibraryImportRoutes } from "./routes/library-import.js";
+import { registerLibraryMergeRoutes } from "./routes/library-merge.js";
 import { registerLibraryMetadataRoutes } from "./routes/library-metadata.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 
@@ -20,6 +21,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   registerLibraryRoutes(app, deps.libraryRepository);
   registerLibraryImportRoutes(app, deps.libraryRepository, deps.metadataProviders);
   registerLibraryMetadataRoutes(app, deps.libraryRepository, deps.metadataProviders);
+  registerLibraryMergeRoutes(app, deps.libraryRepository, deps.metadataProviders);
 
   return app;
 }

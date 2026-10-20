@@ -23,6 +23,18 @@ Repo: https://github.com/miroreo/TessaTV (private).
   every time. Fixed with a `sourceKey` field (the stable, original scanned folder name,
   never touched by identify) that import now matches on instead. Verified live:
   re-importing the full real library twice in a row now gives `created: 0` both times.
+  Follow-up: fixing `sourceKey` surfaced a side effect — two *different* source folders
+  for the same real show (e.g. "Ink Master" / "Ink.Master", split across seasons) no
+  longer get accidentally merged by a title-matching coincidence. Built
+  `mergeDuplicateSeries`/`confirmSeriesMerge` to handle this properly: root series nodes
+  sharing an external id get auto-merged when the match is unambiguous (re-checked by
+  re-searching each side's original folder-derived title), otherwise reported `pending`
+  for `POST /api/library/merge-duplicates/confirm`. Wired into the end of
+  `POST /api/library/import` automatically. Live-verified on the real "Ink Master" case —
+  confirmed `pending` (TheTVDB has multiple similarly-named entries, correctly not
+  auto-merged), then confirmed explicitly: one node survives with both seasons' full
+  episode counts intact, and re-running the sweep afterward finds nothing left to merge.
+  This also caught a second real bug — see "Non-obvious implementation notes".
 - ⬜ **M3 — Streaming + Jellyfin-compat phases 1–2.** Not started.
 - ⬜ **M4 — Acquisition pipeline, first protocol.** Not started.
 - ⬜ **M5 — Second protocol adapter.** Not started.
@@ -185,8 +197,8 @@ side effect worth knowing: two *different* source folders that happen to be the 
 show (e.g. a library with both `Ink Master` and `Ink.Master` folders for different
 seasons) are no longer accidentally merged by a title-matching coincidence — each becomes
 its own series node, and both independently resolve to the same external id on identify.
-Deliberately not "fixed" further — merging two sources into one node is a separate,
-unrequested feature, not a correctness bug.
+This was deliberately requested as a real feature rather than left alone — see
+`mergeDuplicateSeries` under "Metadata" below.
 
 Filename/foldername parsing is deliberately scoped to **documented, public conventions**,
 not tuned against any one library's files (that was an explicit correction mid-build —
@@ -258,6 +270,23 @@ code (not guessed from memory):
   `/artwork/types` reference endpoint rather than assumed: series poster=2/background=3,
   movie poster=14/background=15. The top-level `image` field conveniently already gives
   the primary poster for both, so only backdrop needs an artworks-array lookup.
+
+**Duplicate-series merging** (`mergeDuplicateSeries`/`confirmSeriesMerge` in
+`packages/library`): two root series nodes that end up sharing the same `(provider,
+externalId)` — i.e. two source folders turned out to be the same real show — get merged.
+The policy, confirmed in a decision: merge automatically only when **unambiguous**,
+otherwise ask. "Unambiguous" is re-checked at merge time, not trusted from whenever the
+original identify happened: re-derive each node's originally-searched title from its
+`sourceKey` and re-run `search()` — exactly one candidate on both sides means merge; more
+than one on either side means the original identification was itself a guess among
+options, so merging on top of it would compound that guess, and it's reported in
+`pending` for `POST /api/library/merge-duplicates/confirm` instead. The merge itself
+reparents the duplicate's season nodes onto the primary (earliest-created wins), falling
+back to the same per-episode `(season, episode)` identity `importShows` already uses when
+both sides happen to have the same season number. `POST /api/library/import` runs this
+automatically (series only — merging movie duplicates raises a different, out-of-scope
+question: which file should win). Scoped to series because that's the reported case;
+movie-duplicate merging would need a file-selection policy this doesn't attempt.
 
 ### Acquisition subsystem (not yet built)
 
@@ -385,6 +414,11 @@ curl -X POST http://localhost:8096/api/library/<id>/metadata/identify \
 # Auto-identify every un-identified item in the library at once
 curl -X POST http://localhost:8096/api/library/auto-identify
 
+# Find/merge root series nodes that share an external id (auto-merges unambiguous ones)
+curl -X POST http://localhost:8096/api/library/merge-duplicates
+curl -X POST http://localhost:8096/api/library/merge-duplicates/confirm \
+  -H 'Content-Type: application/json' -d '{"primaryNodeId":"<id>","duplicateNodeId":"<id>"}'
+
 # Wipe library data for a clean re-import (dev only — does not touch scheduled_job)
 docker exec docker-postgres-1 psql -U tessatv -d tessatv -c \
   "TRUNCATE TABLE media_file, unit, library_node, external_id, metadata_cache RESTART IDENTITY CASCADE;"
@@ -398,6 +432,11 @@ docker exec docker-postgres-1 psql -U tessatv -d tessatv -c \
 `TMDB_API_KEY` / `TVDB_API_KEY`. The server's `dev` script loads it via Node's native
 `--env-file` flag — Turborepo does **not** forward the shell's exported env vars through
 its task graph, so relying on `source .env` alone silently breaks under `turbo watch`.
+
+`packages/persistence`'s `library-repository.test.ts` needs a running Postgres (the same
+one `db:migrate` targets) — unlike every other test in the repo, which is pure-function
+only. Run `docker compose -f docker/docker-compose.yml up -d postgres` first if `pnpm
+turbo run test` fails only on that one file.
 
 ### Non-obvious implementation notes
 
@@ -431,3 +470,14 @@ its task graph, so relying on `source .env` alone silently breaks under `turbo w
   whether the affected tables can just be emptied first (dev data, nothing externally
   referenced) rather than engineering a backfill — `TRUNCATE ... CASCADE` then migrate is
   simpler and more honest than a default value that's wrong for already-written rows.
+- `DrizzleLibraryRepository.updateNode`'s SQL `SET` clause only listed the fields that had
+  ever needed updating *so far* (title, sortTitle, monitored, qualityProfileId) — it
+  silently dropped `parentId`, because no feature before series-merging ever needed to
+  reparent a node. The series-merge tests all passed because the in-memory test fakes do
+  `this.nodes.set(node.id, node)`, persisting every field by construction — a fake that
+  complete can never catch a real repository silently dropping one. Only showed up live,
+  against the real Postgres, as a season quietly staying attached to a node that had just
+  been deleted. Fixed by adding `parentId` to the `SET` clause and adding a real
+  Postgres-backed test (`library-repository.test.ts`) specifically for `updateNode`
+  persisting every mutable field — the first persistence test in the repo that isn't a
+  pure-function mapper test, deliberately, because this class of bug needs one.

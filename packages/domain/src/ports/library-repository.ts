@@ -11,6 +11,10 @@ export interface LibraryRepository {
   listChildren(parentId: string | null): Promise<LibraryNode[]>;
   createNode(node: LibraryNode): Promise<void>;
   updateNode(node: LibraryNode): Promise<void>;
+  /** Deletes exactly this node (and its external ids) — callers must reparent or delete
+   * any children first; there is no cascading delete across the unconstrained parentId
+   * self-reference. */
+  deleteNode(id: string): Promise<void>;
 
   getUnit(id: string): Promise<Unit | null>;
   listUnits(libraryNodeId: string): Promise<Unit[]>;

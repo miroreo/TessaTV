@@ -19,6 +19,10 @@ class InMemoryLibraryRepository implements LibraryRepository {
     const index = this.nodes.findIndex((existing) => existing.id === node.id);
     if (index >= 0) this.nodes[index] = node;
   }
+  async deleteNode(id: string) {
+    const index = this.nodes.findIndex((existing) => existing.id === id);
+    if (index >= 0) this.nodes.splice(index, 1);
+  }
   async getUnit() {
     return null;
   }
