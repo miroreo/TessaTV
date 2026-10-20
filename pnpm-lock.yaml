@@ -220,6 +220,9 @@ importers:
       '@tessatv/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@tessatv/web':
+        specifier: workspace:*
+        version: link:../web
       fastify:
         specifier: ^5.2.0
         version: 5.12.7

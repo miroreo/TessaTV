@@ -1,6 +1,7 @@
 import type { LibraryNode, LibraryRepository, MediaFile, Unit } from "@tessatv/domain";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
+import type { NodeRequestHandler } from "./routes/web-ui.js";
 
 function fakeNode(overrides: Partial<LibraryNode> = {}): LibraryNode {
   return {
@@ -85,5 +86,45 @@ describe("jellyfin-compat mounting", () => {
     expect(info.statusCode).toBe(200);
     expect(info.json()).toMatchObject({ Id: "0123456789abcdef0123456789abcdef", ProductName: "Jellyfin Server" });
     expect((await app.inject({ method: "GET", url: "/api/library" })).statusCode).toBe(200);
+  });
+});
+
+describe("web UI mounting", () => {
+  const webUiHandler: NodeRequestHandler = (req, res, next) => {
+    if (req.url === "/web/missing") return next();
+    res.setHeader("content-type", "text/html");
+    res.end(`<p>ui:${req.url}</p>`);
+  };
+  const app = () =>
+    buildApp({ metadataProviders: {}, libraryRepository: new InMemoryLibraryRepository(), webUiHandler });
+
+  it("redirects the root to /web, where Jellyfin Mobile's web view lands", async () => {
+    const response = await app().inject({ method: "GET", url: "/" });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("/web/");
+  });
+
+  it("hands /web and everything under it to the SvelteKit handler", async () => {
+    expect((await app().inject({ method: "GET", url: "/web" })).body).toBe("<p>ui:/web</p>");
+    expect((await app().inject({ method: "GET", url: "/web/library?x=1" })).body).toBe("<p>ui:/web/library?x=1</p>");
+  });
+
+  it("tells SvelteKit the real protocol, ignoring a client-supplied header", async () => {
+    let seen: string | string[] | undefined;
+    const spy: NodeRequestHandler = (req, res) => {
+      seen = req.headers["x-tessatv-forwarded-proto"];
+      res.end();
+    };
+    const spyApp = buildApp({ metadataProviders: {}, libraryRepository: new InMemoryLibraryRepository(), webUiHandler: spy });
+    await spyApp.inject({ method: "GET", url: "/web/", headers: { "x-tessatv-forwarded-proto": "https" } });
+    expect(seen).toBe("http");
+  });
+
+  it("404s when SvelteKit passes on a request", async () => {
+    expect((await app().inject({ method: "GET", url: "/web/missing" })).statusCode).toBe(404);
+  });
+
+  it("leaves /api to Fastify", async () => {
+    expect((await app().inject({ method: "GET", url: "/api/library" })).json()).toEqual({ items: [] });
   });
 });

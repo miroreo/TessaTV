@@ -45,7 +45,10 @@ Repo: https://github.com/miroreo/TessaTV (private).
   remux + software transcode + VAAPI transcode all succeed on a representative sample
   (HEVC 8/10-bit, AV1 10-bit + Opus, Hi10P H.264, XviD AVI, PGS-subtitled BluRay) — VAAPI
   encodes ~1.7–3.5× faster than software with first playlist ready in ~0.4–1.0s. Not yet
-  wired into `apps/server`. **Next: `jellyfin-compat`.** Live client testing is the plan
+  wired into `apps/server`. `jellyfin-compat` exists with discovery only
+  (`/System/Info/Public`, `/System/Ping`); the SvelteKit UI is served by the Node process
+  at `/web` (root redirects there) — see the Jellyfin Mobile decision below for why. **Next:
+  auth (first-run setup + login), then gating `/api`, then a playback API + player.** Live client testing is the plan
   for the compat phase: the dev server's `PORT` was moved to **8080** (still binds
   `0.0.0.0`) specifically so the official Jellyfin iOS app can connect to this machine
   over LAN (`http://10.8.128.8:8080`) or Tailscale (`http://100.97.251.108:8080`) as each
@@ -95,6 +98,20 @@ The explicit goals driving every structural choice below:
   for v1 validation is the **official Jellyfin iOS app** (confirmed testable on hand).
   Infuse, Findroid, and TV clients (Android TV/tvOS) are out of scope for now — not
   prioritized, revisit if/when that hardware becomes available.
+- **"Official Jellyfin iOS app" = Jellyfin Mobile (jellyfin-expo), and it gets TessaTV's own
+  UI** (decided 2026-10-20). Confirmed from its source: it only calls
+  `/system/info/public` (requires `ProductName === "Jellyfin Server"`), then loads the
+  server root in a web view with injected `window.NativeShell` hooks (native video/audio
+  player via `ExpoVideoPlayer.play {url, backdropUrl}`, fullscreen, a Jellyfin device
+  profile in `window.ExpoVideoProfile`). It does not need jellyfin-web — any page works.
+  Chosen over serving the stock jellyfin-web bundle: the SvelteKit UI is served at `/web`
+  (root redirects there, like real Jellyfin) and calls the NativeShell hooks when present.
+  Consequence: for M3, Jellyfin Mobile exercises only the compat layer's discovery
+  endpoint; the Jellyfin REST surface (Jellyfin-style login/browse/playback) is deferred
+  until a native REST client (Swiftfin, Infuse) is targeted.
+- **First user is created through a first-run setup page** in the UI (only available
+  while no users exist), not env vars or a CLI. Once auth works, TessaTV's own `/api` is
+  locked down behind login.
 - Hardware transcoding (VAAPI/NVENC/QSV) is in scope early, not deferred — moved up in the
   roadmap alongside the rest of the streaming subsystem.
 
@@ -384,11 +401,12 @@ watchable player working sooner, before both acquisition protocols are complete:
 
 - **M1 — Core domain + persistence + manual library + minimal UI.** ✅ Done.
 - **M2 — Metadata.** ✅ Done.
-- **M3 — Streaming + Jellyfin-compat phases 1–2.** `streaming`'s `PlaybackPlan`/
-  `TranscodeSession` (including hardware-accel strategy selection), plus compat-layer auth,
-  browse, images, direct play, transcode negotiation, and HLS delivery — enough for the
-  official Jellyfin iOS app to log in, browse, and play content end-to-end. This is the
-  "watchable" milestone.
+- **M3 — Streaming + watchable in Jellyfin Mobile.** `streaming`'s `PlaybackPlan`/
+  `TranscodeSession` (including hardware-accel strategy selection), Jellyfin discovery,
+  first-run setup + login, and TessaTV's own UI at `/web` with browse, direct play and HLS
+  transcode — using Jellyfin Mobile's native player when running inside it — enough for
+  the official Jellyfin iOS app to connect, log in, browse, and play content end-to-end.
+  This is the "watchable" milestone. (Jellyfin REST phases moved later — see Decisions.)
 - **M4 — Acquisition pipeline, first protocol.** Full search→decide→grab→monitor→import
   flow for one `Indexer` + one `DownloadClient` adapter pair.
 - **M5 — Second protocol adapter.** Add the other protocol family's adapters against the
@@ -411,8 +429,8 @@ watchable player working sooner, before both acquisition protocols are complete:
   confirmed persisted in Postgres. TheTVDB verification pending that adapter's build.
 - **M3** 🔄: `streaming` verified against real ffmpeg/ffprobe and real library files
   (probe sweep over the whole library; remux/software/VAAPI sessions on a representative
-  sample). Remaining: Jellyfin iOS app to the running server, authenticate, browse
-  the library, and play a file via both direct play and a forced-transcode path (including
+  sample). Remaining: connect Jellyfin Mobile on iOS to the running server, complete
+  first-run setup, log in, browse the library, and play a file via both direct play and a forced-transcode path (including
   a hardware-accel path if test hardware supports it).
 - **M4/M5**: for each protocol, configure a real (or sandboxed/test) indexer + download
   client, confirm a search → grab → import cycle completes; after M5, diff `acquisition`'s
@@ -438,7 +456,8 @@ pnpm --filter @tessatv/persistence db:migrate
 
 # Hot-reload dev loop for the server + web app (rebuilds/restarts on any dependency change)
 pnpm exec turbo watch dev --filter=@tessatv/server --filter=@tessatv/web
-# server: http://localhost:8080   web: http://localhost:5173 (proxies /api to the server)
+# server: http://localhost:8080 (also serves the built UI at /web)
+# web (vite HMR): http://localhost:5173/web (proxies /api to the server)
 
 # Build + test everything
 pnpm turbo run build test
@@ -496,6 +515,12 @@ turbo run test` fails only on that one file.
   naming spec, Kodi/XBMC's `1x05`, fansub absolute numbering) rather than iteratively
   patched to fit one library's files — that distinction was an explicit course-correction
   mid-build.
+- `apps/server` serves the UI by importing `@tessatv/web/handler` (SvelteKit adapter-node's
+  built handler) — so `/web` on :8080 shows the last *build*, not the vite dev server.
+  adapter-node assumes `https` unless a protocol header says otherwise, which made SSR's
+  same-origin `fetch("/api/...")` fail over plain-HTTP LAN; the server now always sets
+  `x-tessatv-forwarded-proto` from Fastify's own view of the connection (so clients can't
+  spoof it) and points adapter-node's `PROTOCOL_HEADER` at it.
 - `tsx --watch` runs as a supervisor process that respawns a child worker on file
   changes — `ps aux` shows two node processes for the server (the outer one keeps
   `--watch` in its args, the respawned child doesn't). If something goes wrong and the

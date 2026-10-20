@@ -6,6 +6,7 @@ import { registerLibraryImportRoutes } from "./routes/library-import.js";
 import { registerLibraryMergeRoutes } from "./routes/library-merge.js";
 import { registerLibraryMetadataRoutes } from "./routes/library-metadata.js";
 import { registerLibraryRoutes } from "./routes/library.js";
+import { type NodeRequestHandler, registerWebUiRoutes } from "./routes/web-ui.js";
 
 export interface AppDependencies {
   libraryRepository: LibraryRepository;
@@ -14,6 +15,8 @@ export interface AppDependencies {
   metadataProviders: MetadataProvidersByKind;
   /** Mounts the Jellyfin-compatible API at the root. Omitted only in tests that don't need it. */
   jellyfin?: JellyfinCompatOptions;
+  /** SvelteKit's built handler, served under /web. Omitted when the web app isn't built. */
+  webUiHandler?: NodeRequestHandler;
 }
 
 export function buildApp(deps: AppDependencies): FastifyInstance {
@@ -29,6 +32,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   registerLibraryMergeRoutes(app, deps.libraryRepository, deps.metadataProviders);
 
   if (deps.jellyfin) registerJellyfinCompat(app, deps.jellyfin);
+  if (deps.webUiHandler) registerWebUiRoutes(app, deps.webUiHandler);
 
   return app;
 }

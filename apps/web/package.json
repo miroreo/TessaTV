@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "exports": {
+    "./handler": "./build/handler.js"
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",

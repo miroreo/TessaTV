@@ -5,6 +5,7 @@ import { JobRunner } from "@tessatv/jobs";
 import { CachedMetadataProvider, TmdbClient, TmdbMetadataProvider, TvdbClient, TvdbMetadataProvider } from "@tessatv/metadata";
 import { createDatabase, DrizzleJobRepository, DrizzleLibraryRepository, DrizzleMetadataCacheRepository } from "@tessatv/persistence";
 import { buildApp } from "./app.js";
+import { loadWebUiHandler } from "./routes/web-ui.js";
 
 const METADATA_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // matches CachedMetadataProvider's default TTL
 
@@ -29,10 +30,13 @@ const metadataProviders: MetadataProvidersByKind = {
   ...(tvdbProvider ? { series: tvdbProvider } : {}),
 };
 
+const webUiHandler = await loadWebUiHandler();
+
 const app = buildApp({
   libraryRepository,
   metadataProviders,
   jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },
+  ...(webUiHandler ? { webUiHandler } : {}),
 });
 
 const jobRunner = new JobRunner(new DrizzleJobRepository(db));
@@ -51,6 +55,7 @@ app
   .listen({ port: config.PORT, host: "0.0.0.0" })
   .then(async () => {
     app.log.info(`TessaTV server listening on port ${config.PORT}`);
+    if (!webUiHandler) app.log.warn("Web UI build not found — run `pnpm --filter @tessatv/web build`; /web will 404 until then");
     if (!tmdbProvider) app.log.warn("TMDB_API_KEY not set — movie metadata routes will return 503 until it is configured");
     if (!tvdbProvider) app.log.warn("TVDB_API_KEY not set — series metadata routes will return 503 until it is configured");
     await jobRunner.start();
