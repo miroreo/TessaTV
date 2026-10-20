@@ -1,28 +1,38 @@
 import { loadConfig } from "@tessatv/config";
-import { CachedMetadataProvider, TmdbClient, TmdbMetadataProvider } from "@tessatv/metadata";
+import type { MetadataProvidersByKind } from "@tessatv/library";
+import { CachedMetadataProvider, TmdbClient, TmdbMetadataProvider, TvdbClient, TvdbMetadataProvider } from "@tessatv/metadata";
 import { createDatabase, DrizzleLibraryRepository, DrizzleMetadataCacheRepository } from "@tessatv/persistence";
 import { buildApp } from "./app.js";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
 const libraryRepository = new DrizzleLibraryRepository(db);
+const metadataCacheRepository = new DrizzleMetadataCacheRepository(db);
 
-const metadataProvider = config.TMDB_API_KEY
-  ? new CachedMetadataProvider(
-      new TmdbMetadataProvider(new TmdbClient({ apiKey: config.TMDB_API_KEY })),
-      new DrizzleMetadataCacheRepository(db),
-    )
+const tmdbProvider = config.TMDB_API_KEY
+  ? new CachedMetadataProvider(new TmdbMetadataProvider(new TmdbClient({ apiKey: config.TMDB_API_KEY })), metadataCacheRepository)
   : null;
 
-const app = buildApp({ libraryRepository, metadataProvider });
+const tvdbProvider = config.TVDB_API_KEY
+  ? new CachedMetadataProvider(new TvdbMetadataProvider(new TvdbClient({ apiKey: config.TVDB_API_KEY })), metadataCacheRepository)
+  : null;
+
+// Default split: movies -> TMDB, TV -> TheTVDB (chosen for TheTVDB's more reliable season/
+// episode numbering). An explicit `?provider=`/`{provider}` on the metadata routes can
+// still request the other one directly.
+const metadataProviders: MetadataProvidersByKind = {
+  ...(tmdbProvider ? { movie: tmdbProvider } : {}),
+  ...(tvdbProvider ? { series: tvdbProvider } : {}),
+};
+
+const app = buildApp({ libraryRepository, metadataProviders });
 
 app
   .listen({ port: config.PORT, host: "0.0.0.0" })
   .then(() => {
     app.log.info(`TessaTV server listening on port ${config.PORT}`);
-    if (!metadataProvider) {
-      app.log.warn("TMDB_API_KEY not set — metadata routes will return 503 until it is configured");
-    }
+    if (!tmdbProvider) app.log.warn("TMDB_API_KEY not set — movie metadata routes will return 503 until it is configured");
+    if (!tvdbProvider) app.log.warn("TVDB_API_KEY not set — series metadata routes will return 503 until it is configured");
   })
   .catch((error: unknown) => {
     app.log.error(error);

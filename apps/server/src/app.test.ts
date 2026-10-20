@@ -46,7 +46,7 @@ class InMemoryLibraryRepository implements LibraryRepository {
 
 describe("GET /health", () => {
   it("reports ok", async () => {
-    const app = buildApp({ metadataProvider: null, libraryRepository:new InMemoryLibraryRepository() });
+    const app = buildApp({ metadataProviders: {}, libraryRepository:new InMemoryLibraryRepository() });
     const response = await app.inject({ method: "GET", url: "/health" });
     expect(response.json()).toEqual({ status: "ok" });
   });
@@ -55,7 +55,7 @@ describe("GET /health", () => {
 describe("GET /api/library", () => {
   it("lists root library nodes", async () => {
     const repo = new InMemoryLibraryRepository([fakeNode()]);
-    const app = buildApp({ metadataProvider: null, libraryRepository:repo });
+    const app = buildApp({ metadataProviders: {}, libraryRepository:repo });
 
     const response = await app.inject({ method: "GET", url: "/api/library" });
     const body = response.json<{ items: LibraryNode[] }>();
@@ -66,7 +66,7 @@ describe("GET /api/library", () => {
 
 describe("GET /api/library/:id/units", () => {
   it("returns 404 for an unknown node", async () => {
-    const app = buildApp({ metadataProvider: null, libraryRepository:new InMemoryLibraryRepository() });
+    const app = buildApp({ metadataProviders: {}, libraryRepository:new InMemoryLibraryRepository() });
     const response = await app.inject({ method: "GET", url: "/api/library/missing/units" });
     expect(response.statusCode).toBe(404);
   });

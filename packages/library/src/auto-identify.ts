@@ -2,11 +2,16 @@ import type { LibraryNode, LibraryRepository } from "@tessatv/domain";
 import type { MetadataMediaKind, MetadataProvider } from "@tessatv/metadata";
 import { toMetadataMediaKind } from "@tessatv/metadata";
 
+/** Which provider to use for each media kind, e.g. `{ movie: tmdbProvider, series: tvdbProvider }`.
+ * A media kind with no entry (or `undefined`) is skipped rather than erroring. */
+export type MetadataProvidersByKind = Partial<Record<MetadataMediaKind, MetadataProvider>>;
+
 export interface AutoIdentifyMatch {
   readonly nodeId: string;
   readonly previousTitle: string;
   readonly matchedTitle: string;
   readonly externalId: string;
+  readonly provider: string;
 }
 
 export interface AutoIdentifyMiss {
@@ -25,6 +30,8 @@ export interface AutoIdentifySummary {
   readonly noMatch: readonly AutoIdentifyMiss[];
   readonly errors: readonly AutoIdentifyError[];
   readonly alreadyIdentified: number;
+  /** Nodes whose media kind has no provider configured (e.g. TVDB_API_KEY unset). */
+  readonly unavailable: number;
 }
 
 async function identifyOne(
@@ -53,16 +60,22 @@ async function identifyOne(
     updatedAt: new Date(),
   });
 
-  return { nodeId: node.id, previousTitle: node.title, matchedTitle: details.title, externalId: topMatch.externalId };
+  return {
+    nodeId: node.id,
+    previousTitle: node.title,
+    matchedTitle: details.title,
+    externalId: topMatch.externalId,
+    provider: provider.id,
+  };
 }
 
 /**
  * Sweeps every root-level library node (movies, top-level series — `listChildren(null)`
- * only ever returns roots) that doesn't already have an external id from this provider,
- * searches by title, and auto-applies the top-ranked candidate. This is the "auto" policy
- * built on top of the same search/identify primitives the manual confirmation flow uses —
- * nothing here is provider-specific, so the same sweep works unchanged once a second
- * provider (TheTVDB) is wired in.
+ * only ever returns roots) that doesn't already have an external id from its kind's
+ * provider, searches by title, and auto-applies the top-ranked candidate. Movies and
+ * series can use different providers (e.g. TMDB for movies, TheTVDB for TV numbering
+ * accuracy) — nothing here is provider-specific, so adding a third media kind/provider
+ * later needs no changes beyond a new map entry.
  *
  * A failure on one node (e.g. a transient network error calling the provider) is recorded
  * in `errors` and does not abort the rest of the sweep — losing 55 already-identified
@@ -70,17 +83,24 @@ async function identifyOne(
  */
 export async function autoIdentifyLibrary(
   repository: LibraryRepository,
-  provider: MetadataProvider,
+  providers: MetadataProvidersByKind,
 ): Promise<AutoIdentifySummary> {
   const roots = await repository.listChildren(null);
   const identified: AutoIdentifyMatch[] = [];
   const noMatch: AutoIdentifyMiss[] = [];
   const errors: AutoIdentifyError[] = [];
   let alreadyIdentified = 0;
+  let unavailable = 0;
 
   for (const node of roots) {
     const mediaKind = toMetadataMediaKind(node.mediaType);
     if (!mediaKind) continue;
+
+    const provider = providers[mediaKind];
+    if (!provider) {
+      unavailable++;
+      continue;
+    }
 
     if (node.externalIds.some((externalId) => externalId.provider === provider.id)) {
       alreadyIdentified++;
@@ -99,5 +119,5 @@ export async function autoIdentifyLibrary(
     }
   }
 
-  return { identified, noMatch, errors, alreadyIdentified };
+  return { identified, noMatch, errors, alreadyIdentified, unavailable };
 }

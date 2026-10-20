@@ -4,8 +4,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   PORT: z.coerce.number().int().positive().default(8096),
   APP_SECRET: z.string().min(32, "APP_SECRET must be at least 32 characters (used to derive credential encryption key)"),
-  // Optional: metadata features are disabled (not absent/erroring) until a key is provided.
+  // Optional: each provider's metadata features are disabled (not absent/erroring) until
+  // its key is provided.
   TMDB_API_KEY: z.string().min(1).optional(),
+  TVDB_API_KEY: z.string().min(1).optional(),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

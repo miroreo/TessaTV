@@ -6,11 +6,21 @@ live only in chat history.
 
 ## Status (as of 2026-10-19)
 
+Repo: https://github.com/miroreo/TessaTV (private).
+
 - ✅ **M1 — Core domain + persistence + manual library + minimal UI.** Done. Manual
   filesystem import works end-to-end against a real library (movies + TV).
-- 🔄 **M2 — Metadata.** In progress. TMDB adapter built, tested, and verified live
-  (search → identify → cached details, confirmed persisted in Postgres). TheTVDB adapter
-  is the agreed next step (fast-follow) — API key is in `.env`, adapter not yet built.
+- ✅ **M2 — Metadata.** Both adapters done, tested, and live-verified. Default split:
+  movies → TMDB, TV → TheTVDB (TheTVDB specifically for numbering/title accuracy — live
+  sweep confirmed this: TMDB couldn't confidently match one show in the real library,
+  TheTVDB resolved it correctly to its canonical title). `?provider=`/`{provider}` on the
+  metadata routes can request the other provider explicitly. Auto-identify sweep
+  (`autoIdentifyLibrary`, `POST /api/library/auto-identify`) picks the right provider per
+  node's media kind, converges cleanly, and survives a transient provider failure on one
+  node without losing the rest of the batch (see "Non-obvious implementation notes").
+  Remaining from the original M2 scope, not yet done: wiring identification automatically
+  *into* the import flow itself (today it's always a separate manual or sweep call), and a
+  periodic metadata refresh job (needs the `jobs` package, which doesn't exist yet).
 - ⬜ **M3 — Streaming + Jellyfin-compat phases 1–2.** Not started.
 - ⬜ **M4 — Acquisition pipeline, first protocol.** Not started.
 - ⬜ **M5 — Second protocol adapter.** Not started.
@@ -18,8 +28,8 @@ live only in chat history.
 - ⬜ **M7 (stretch) — second media type (Music).** Not started.
 
 Packages that exist today: `domain`, `persistence`, `config`, `library`, `metadata`
-(TMDB only), `apps/server`, `apps/web`. Not yet built: `indexers`, `download-clients`,
-`acquisition`, `streaming`, `jellyfin-compat`, `jobs`, `shared`.
+(TMDB + TheTVDB), `apps/server`, `apps/web`. Not yet built: `indexers`,
+`download-clients`, `acquisition`, `streaming`, `jellyfin-compat`, `jobs`, `shared`.
 
 ## Context
 
@@ -109,7 +119,7 @@ tessatv/
       adapters-usenet/      # SABnzbd, NZBGet adapters
     acquisition/           # protocol- and media-type-agnostic orchestration:
                           # search -> decide -> grab -> monitor -> import
-    metadata/              # MetadataProvider interface; TMDB (done) + TheTVDB (planned)
+    metadata/              # MetadataProvider interface; TMDB + TheTVDB adapters (both done)
                           # adapters; cache decorator
     library/               # file organization, naming/rename, scanning, import pipeline
     streaming/             # ClientCapabilities/PlaybackPlan, FFmpeg/TranscodeSession
@@ -178,20 +188,56 @@ see git history around the parser-hardening commits):
   season info) — read from the filename itself, not the season-folder name, since real
   libraries have inconsistent/duplicate/empty season folders.
 
-### Metadata (in progress)
+### Metadata (done)
 
 `packages/metadata` defines `MetadataProvider` (`search`, `fetchDetails`) against generic
-shapes, not any one provider's wire format. `TmdbMetadataProvider` is the first adapter.
-`CachedMetadataProvider` wraps any provider so `fetchDetails` reads/writes a persisted
-cache (`metadata_cache` table) instead of hitting the provider's API per request — search
-results are intentionally never cached (one-off disambiguation, not something to replay).
+shapes, not any one provider's wire format. `TmdbMetadataProvider` and
+`TvdbMetadataProvider` are the two adapters. `CachedMetadataProvider` wraps either so
+`fetchDetails` reads/writes a persisted cache (`metadata_cache` table) instead of hitting
+the provider's API per request — search results are intentionally never cached (one-off
+disambiguation, not something to replay).
+
+Provider selection, confirmed in a locked decision: **movies default to TMDB, TV defaults
+to TheTVDB** (TheTVDB specifically for season/episode numbering and title accuracy — see
+the real example below). `apps/server` wires both into a `MetadataProvidersByKind` map
+(`{ movie: tmdb, series: tvdb }`, built in `index.ts`), and every metadata route accepts an
+explicit `?provider=`/`{provider}` override to use the other one instead of the default.
 
 Identification flow: `GET /api/library/:id/metadata/candidates` (search by the node's
 title, optional `?year=`) → `POST /api/library/:id/metadata/identify {externalId}` (fetch
 details, update the node's title + record the provider's external id) → `GET
 /api/library/:id/metadata` (cached details). Restricted to root-level nodes (movies,
-top-level series) — seasons/episodes aren't independently searchable. All three routes
-return `503` if `TMDB_API_KEY` isn't configured, rather than crashing the app.
+top-level series) — seasons/episodes aren't independently searchable. All three routes,
+plus auto-identify below, return `503` for a media kind with no provider configured
+(missing `TMDB_API_KEY`/`TVDB_API_KEY`), rather than crashing the app.
+
+`POST /api/library/auto-identify` (`autoIdentifyLibrary` in `packages/library`) sweeps
+every root node, picks the right provider for its media kind, and auto-applies the top
+search candidate — the "auto" policy built on the same primitives as the manual flow.
+Live-verified on the real library with both providers configured: 30 series + 26 movies,
+0 errors, 0 no-matches. Concretely validated the TMDB→TheTVDB rationale in the same run:
+one show ("...2018" baked into the title, no parens-year) had no confident TMDB match but
+TheTVDB resolved it correctly to its canonical title. A failure on one node (e.g. a
+transient network error) is recorded in the summary's `errors` list rather than aborting
+the whole sweep — the first live run (TMDB-only, before this was added) hit exactly this,
+a `fetch failed` mid-sweep that killed the whole batch with a 500. Known limitation, not
+a bug: auto-applying the *top*
+candidate can pick the wrong title for an ambiguous query (e.g. a short/generic title
+matched the wrong film in the real library) — visible and correctable via the manual
+`candidates`/`identify` endpoints, not silently wrong forever.
+
+TheTVDB-specific quirks, confirmed empirically against the live API before writing any
+code (not guessed from memory):
+- Auth is a login step, not a static key: `POST /login { apikey }` returns a bearer token
+  (confirmed valid ~1 month). `TvdbClient` caches it in memory and reactively re-logs-in
+  exactly once on a `401`, rather than proactively tracking expiry.
+- `GET /movies/{id}/extended` does **not** include overview text — only which languages a
+  translation exists in. Getting the actual text needs a second call,
+  `GET /movies/{id}/translations/eng`. Series' `extended` endpoint has no such gap.
+- Artwork `type` ids are **not** shared between record types — confirmed via TheTVDB's own
+  `/artwork/types` reference endpoint rather than assumed: series poster=2/background=3,
+  movie poster=14/background=15. The top-level `image` field conveniently already gives
+  the primary poster for both, so only backdrop needs an artworks-array lookup.
 
 ### Acquisition subsystem (not yet built)
 
@@ -308,6 +354,9 @@ curl -X POST http://localhost:8096/api/library/import \
 curl http://localhost:8096/api/library/<id>/metadata/candidates
 curl -X POST http://localhost:8096/api/library/<id>/metadata/identify \
   -H 'Content-Type: application/json' -d '{"externalId":"<tmdb id>"}'
+
+# Auto-identify every un-identified item in the library at once
+curl -X POST http://localhost:8096/api/library/auto-identify
 ```
 
 `.env` (git-ignored) needs `DATABASE_URL`, `APP_SECRET` (32+ chars), and optionally
@@ -328,3 +377,12 @@ its task graph, so relying on `source .env` alone silently breaks under `turbo w
   naming spec, Kodi/XBMC's `1x05`, fansub absolute numbering) rather than iteratively
   patched to fit one library's files — that distinction was an explicit course-correction
   mid-build.
+- `tsx --watch` runs as a supervisor process that respawns a child worker on file
+  changes — `ps aux` shows two node processes for the server (the outer one keeps
+  `--watch` in its args, the respawned child doesn't). If something goes wrong and the
+  child stops tracking changes, `ps aux | grep node` and killing the whole tree (not just
+  one PID) is the reliable fix — this happened once mid-build and silently served stale
+  code (no crash, no error) until caught by a live response not matching the latest code.
+- Don't trust a running dev server's behavior as proof the latest code is deployed —
+  verify the response shape itself changed (e.g. a new field you just added) before
+  trusting live-test results, exactly because of the above.

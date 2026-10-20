@@ -30,8 +30,10 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...validEnv, APP_SECRET: "too-short" })).toThrow(/APP_SECRET/);
   });
 
-  it("TMDB_API_KEY is optional — metadata features stay off rather than blocking startup", () => {
+  it("TMDB_API_KEY and TVDB_API_KEY are optional, independently — each provider stays off rather than blocking startup", () => {
     expect(loadConfig(validEnv).TMDB_API_KEY).toBeUndefined();
+    expect(loadConfig(validEnv).TVDB_API_KEY).toBeUndefined();
     expect(loadConfig({ ...validEnv, TMDB_API_KEY: "a-real-key" }).TMDB_API_KEY).toBe("a-real-key");
+    expect(loadConfig({ ...validEnv, TVDB_API_KEY: "a-real-key" }).TVDB_API_KEY).toBe("a-real-key");
   });
 });

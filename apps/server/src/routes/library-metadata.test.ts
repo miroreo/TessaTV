@@ -50,15 +50,15 @@ class InMemoryLibraryRepository implements LibraryRepository {
   async createMediaFile() {}
 }
 
-function fakeProvider(): MetadataProvider {
+function fakeProvider(id = "tmdb"): MetadataProvider {
   return {
-    id: "tmdb",
+    id,
     search: vi.fn().mockResolvedValue([
       { externalId: "603", title: "Some Movie", year: 1999, overview: "...", posterUrl: null },
     ]),
     fetchDetails: vi.fn().mockResolvedValue({
       externalId: "603",
-      title: "Some Movie (Canonical Title)",
+      title: `Some Movie (Canonical, ${id})`,
       overview: "...",
       year: 1999,
       posterUrl: "https://image.tmdb.org/t/p/w500/x.jpg",
@@ -67,9 +67,9 @@ function fakeProvider(): MetadataProvider {
   };
 }
 
-describe("metadata routes, disabled (no provider)", () => {
+describe("metadata routes, disabled (no provider for this media kind)", () => {
   it("returns 503 on every metadata route", async () => {
-    const app = buildApp({ libraryRepository: new InMemoryLibraryRepository([fakeNode()]), metadataProvider: null });
+    const app = buildApp({ libraryRepository: new InMemoryLibraryRepository([fakeNode()]), metadataProviders: {} });
 
     const candidates = await app.inject({ method: "GET", url: "/api/library/node-1/metadata/candidates" });
     expect(candidates.statusCode).toBe(503);
@@ -84,12 +84,22 @@ describe("metadata routes, disabled (no provider)", () => {
     const autoIdentify = await app.inject({ method: "POST", url: "/api/library/auto-identify" });
     expect(autoIdentify.statusCode).toBe(503);
   });
+
+  it("a configured series provider does not unblock movie routes", async () => {
+    const app = buildApp({
+      libraryRepository: new InMemoryLibraryRepository([fakeNode()]),
+      metadataProviders: { series: fakeProvider("tvdb") },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/library/node-1/metadata/candidates" });
+    expect(response.statusCode).toBe(503);
+  });
 });
 
 describe("POST /api/library/auto-identify", () => {
   it("delegates to autoIdentifyLibrary and returns its summary", async () => {
     const repo = new InMemoryLibraryRepository([fakeNode()]);
-    const app = buildApp({ libraryRepository: repo, metadataProvider: fakeProvider() });
+    const app = buildApp({ libraryRepository: repo, metadataProviders: { movie: fakeProvider() } });
 
     const response = await app.inject({ method: "POST", url: "/api/library/auto-identify" });
 
@@ -97,24 +107,47 @@ describe("POST /api/library/auto-identify", () => {
     const body = response.json<{ identified: unknown[]; noMatch: unknown[]; alreadyIdentified: number }>();
     expect(body.identified).toHaveLength(1);
     const updated = await repo.getNode("node-1");
-    expect(updated?.title).toBe("Some Movie (Canonical Title)");
+    expect(updated?.title).toBe("Some Movie (Canonical, tmdb)");
   });
 });
 
 describe("GET /api/library/:id/metadata/candidates", () => {
-  it("searches using the node's title and media type", async () => {
+  it("searches using the node's title and the default provider for its media type", async () => {
     const provider = fakeProvider();
-    const app = buildApp({ libraryRepository: new InMemoryLibraryRepository([fakeNode()]), metadataProvider: provider });
+    const app = buildApp({
+      libraryRepository: new InMemoryLibraryRepository([fakeNode()]),
+      metadataProviders: { movie: provider },
+    });
 
     const response = await app.inject({ method: "GET", url: "/api/library/node-1/metadata/candidates?year=1999" });
 
     expect(response.statusCode).toBe(200);
+    expect(response.json().provider).toBe("tmdb");
     expect(provider.search).toHaveBeenCalledWith({ title: "Some Movie", year: 1999, mediaKind: "movie" });
+  });
+
+  it("an explicit ?provider= override is used instead of the media-type default", async () => {
+    const tmdb = fakeProvider("tmdb");
+    const tvdb = fakeProvider("tvdb");
+    const app = buildApp({
+      libraryRepository: new InMemoryLibraryRepository([fakeNode()]),
+      metadataProviders: { movie: tmdb, series: tvdb },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/library/node-1/metadata/candidates?provider=tvdb" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().provider).toBe("tvdb");
+    expect(tmdb.search).not.toHaveBeenCalled();
+    expect(tvdb.search).toHaveBeenCalledTimes(1);
   });
 
   it("rejects identification of a season node (non-root series node)", async () => {
     const season = fakeNode({ id: "season-1", mediaType: "series", kind: "collection", parentId: "series-1" });
-    const app = buildApp({ libraryRepository: new InMemoryLibraryRepository([season]), metadataProvider: fakeProvider() });
+    const app = buildApp({
+      libraryRepository: new InMemoryLibraryRepository([season]),
+      metadataProviders: { series: fakeProvider("tvdb") },
+    });
 
     const response = await app.inject({ method: "GET", url: "/api/library/season-1/metadata/candidates" });
 
@@ -125,7 +158,7 @@ describe("GET /api/library/:id/metadata/candidates", () => {
 describe("POST /api/library/:id/metadata/identify", () => {
   it("applies the canonical title and records the provider's external id", async () => {
     const repo = new InMemoryLibraryRepository([fakeNode()]);
-    const app = buildApp({ libraryRepository: repo, metadataProvider: fakeProvider() });
+    const app = buildApp({ libraryRepository: repo, metadataProviders: { movie: fakeProvider() } });
 
     const response = await app.inject({
       method: "POST",
@@ -135,7 +168,7 @@ describe("POST /api/library/:id/metadata/identify", () => {
 
     expect(response.statusCode).toBe(200);
     const updated = await repo.getNode("node-1");
-    expect(updated?.title).toBe("Some Movie (Canonical Title)");
+    expect(updated?.title).toBe("Some Movie (Canonical, tmdb)");
     expect(updated?.externalIds).toEqual([
       { provider: "tmdb", entityType: "library_node", entityId: "node-1", providerId: "603" },
     ]);
@@ -144,7 +177,10 @@ describe("POST /api/library/:id/metadata/identify", () => {
   it("returns 404 when the external id doesn't resolve to anything", async () => {
     const provider = fakeProvider();
     (provider.fetchDetails as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    const app = buildApp({ libraryRepository: new InMemoryLibraryRepository([fakeNode()]), metadataProvider: provider });
+    const app = buildApp({
+      libraryRepository: new InMemoryLibraryRepository([fakeNode()]),
+      metadataProviders: { movie: provider },
+    });
 
     const response = await app.inject({
       method: "POST",
@@ -158,7 +194,10 @@ describe("POST /api/library/:id/metadata/identify", () => {
 
 describe("GET /api/library/:id/metadata", () => {
   it("returns 404 (not_identified) before an identify call has been made", async () => {
-    const app = buildApp({ libraryRepository: new InMemoryLibraryRepository([fakeNode()]), metadataProvider: fakeProvider() });
+    const app = buildApp({
+      libraryRepository: new InMemoryLibraryRepository([fakeNode()]),
+      metadataProviders: { movie: fakeProvider() },
+    });
 
     const response = await app.inject({ method: "GET", url: "/api/library/node-1/metadata" });
 
@@ -169,11 +208,14 @@ describe("GET /api/library/:id/metadata", () => {
     const node = fakeNode({
       externalIds: [{ provider: "tmdb", entityType: "library_node", entityId: "node-1", providerId: "603" }],
     });
-    const app = buildApp({ libraryRepository: new InMemoryLibraryRepository([node]), metadataProvider: fakeProvider() });
+    const app = buildApp({
+      libraryRepository: new InMemoryLibraryRepository([node]),
+      metadataProviders: { movie: fakeProvider() },
+    });
 
     const response = await app.inject({ method: "GET", url: "/api/library/node-1/metadata" });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().details.title).toBe("Some Movie (Canonical Title)");
+    expect(response.json().details.title).toBe("Some Movie (Canonical, tmdb)");
   });
 });

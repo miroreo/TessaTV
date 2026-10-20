@@ -66,22 +66,34 @@ function fakeDetails(overrides: Partial<MetadataDetails> = {}): MetadataDetails 
   };
 }
 
+function fakeProvider(id: string, overrides: Partial<MetadataProvider> = {}): MetadataProvider {
+  return {
+    id,
+    search: vi.fn().mockResolvedValue([fakeCandidate()]),
+    fetchDetails: vi.fn().mockResolvedValue(fakeDetails()),
+    ...overrides,
+  };
+}
+
 describe("autoIdentifyLibrary", () => {
   it("auto-applies the top search candidate for each unidentified root node", async () => {
     const repo = new InMemoryLibraryRepository([fakeNode()]);
-    const provider: MetadataProvider = {
-      id: "tmdb",
-      search: vi.fn().mockResolvedValue([fakeCandidate()]),
-      fetchDetails: vi.fn().mockResolvedValue(fakeDetails()),
-    };
+    const provider = fakeProvider("tmdb");
 
-    const summary = await autoIdentifyLibrary(repo, provider);
+    const summary = await autoIdentifyLibrary(repo, { movie: provider });
 
     expect(summary.identified).toEqual([
-      { nodeId: "node-1", previousTitle: "Some Movie", matchedTitle: "Some Movie (Canonical)", externalId: "603" },
+      {
+        nodeId: "node-1",
+        previousTitle: "Some Movie",
+        matchedTitle: "Some Movie (Canonical)",
+        externalId: "603",
+        provider: "tmdb",
+      },
     ]);
     expect(summary.noMatch).toEqual([]);
     expect(summary.alreadyIdentified).toBe(0);
+    expect(summary.unavailable).toBe(0);
 
     const updated = await repo.getNode("node-1");
     expect(updated?.title).toBe("Some Movie (Canonical)");
@@ -90,14 +102,39 @@ describe("autoIdentifyLibrary", () => {
     ]);
   });
 
-  it("skips nodes that already have an external id from this provider", async () => {
+  it("uses a different provider per media kind — movies via TMDB, series via TheTVDB", async () => {
+    const movie = fakeNode({ id: "movie-1", mediaType: "movie", title: "Some Movie" });
+    const series = fakeNode({ id: "series-1", mediaType: "series", title: "Some Series" });
+    const repo = new InMemoryLibraryRepository([movie, series]);
+    const tmdb = fakeProvider("tmdb");
+    const tvdb = fakeProvider("tvdb", { fetchDetails: vi.fn().mockResolvedValue(fakeDetails({ title: "Some Series (TVDB)" })) });
+
+    const summary = await autoIdentifyLibrary(repo, { movie: tmdb, series: tvdb });
+
+    expect(tmdb.search).toHaveBeenCalledWith({ title: "Some Movie", year: null, mediaKind: "movie" });
+    expect(tvdb.search).toHaveBeenCalledWith({ title: "Some Series", year: null, mediaKind: "series" });
+    expect(summary.identified.map((match) => match.provider).sort()).toEqual(["tmdb", "tvdb"]);
+  });
+
+  it("counts a node as unavailable when its media kind has no provider configured", async () => {
+    const series = fakeNode({ id: "series-1", mediaType: "series" });
+    const repo = new InMemoryLibraryRepository([series]);
+    const tmdb = fakeProvider("tmdb");
+
+    const summary = await autoIdentifyLibrary(repo, { movie: tmdb });
+
+    expect(summary.unavailable).toBe(1);
+    expect(tmdb.search).not.toHaveBeenCalled();
+  });
+
+  it("skips nodes that already have an external id from the kind's provider", async () => {
     const node = fakeNode({
       externalIds: [{ provider: "tmdb", entityType: "library_node", entityId: "node-1", providerId: "603" }],
     });
     const repo = new InMemoryLibraryRepository([node]);
-    const provider: MetadataProvider = { id: "tmdb", search: vi.fn(), fetchDetails: vi.fn() };
+    const provider = fakeProvider("tmdb");
 
-    const summary = await autoIdentifyLibrary(repo, provider);
+    const summary = await autoIdentifyLibrary(repo, { movie: provider });
 
     expect(summary.alreadyIdentified).toBe(1);
     expect(provider.search).not.toHaveBeenCalled();
@@ -105,13 +142,9 @@ describe("autoIdentifyLibrary", () => {
 
   it("records a miss when search returns no candidates, without touching the node", async () => {
     const repo = new InMemoryLibraryRepository([fakeNode()]);
-    const provider: MetadataProvider = {
-      id: "tmdb",
-      search: vi.fn().mockResolvedValue([]),
-      fetchDetails: vi.fn(),
-    };
+    const provider = fakeProvider("tmdb", { search: vi.fn().mockResolvedValue([]) });
 
-    const summary = await autoIdentifyLibrary(repo, provider);
+    const summary = await autoIdentifyLibrary(repo, { movie: provider });
 
     expect(summary.noMatch).toEqual([{ nodeId: "node-1", title: "Some Movie" }]);
     expect(provider.fetchDetails).not.toHaveBeenCalled();
@@ -120,20 +153,25 @@ describe("autoIdentifyLibrary", () => {
 
   it("records an error for one node without aborting the rest of the sweep", async () => {
     const repo = new InMemoryLibraryRepository([fakeNode({ id: "node-1" }), fakeNode({ id: "node-2", title: "Other Movie" })]);
-    const provider: MetadataProvider = {
-      id: "tmdb",
+    const provider = fakeProvider("tmdb", {
       search: vi.fn().mockImplementation(async ({ title }: { title: string }) => {
         if (title === "Some Movie") throw new Error("fetch failed");
         return [fakeCandidate({ title: "Other Movie" })];
       }),
       fetchDetails: vi.fn().mockResolvedValue(fakeDetails({ title: "Other Movie (Canonical)" })),
-    };
+    });
 
-    const summary = await autoIdentifyLibrary(repo, provider);
+    const summary = await autoIdentifyLibrary(repo, { movie: provider });
 
     expect(summary.errors).toEqual([{ nodeId: "node-1", title: "Some Movie", message: "fetch failed" }]);
     expect(summary.identified).toEqual([
-      { nodeId: "node-2", previousTitle: "Other Movie", matchedTitle: "Other Movie (Canonical)", externalId: "603" },
+      {
+        nodeId: "node-2",
+        previousTitle: "Other Movie",
+        matchedTitle: "Other Movie (Canonical)",
+        externalId: "603",
+        provider: "tmdb",
+      },
     ]);
   });
 
@@ -141,13 +179,9 @@ describe("autoIdentifyLibrary", () => {
     const root = fakeNode({ id: "series-1", mediaType: "series", kind: "collection" });
     const season = fakeNode({ id: "season-1", mediaType: "series", kind: "collection", parentId: "series-1" });
     const repo = new InMemoryLibraryRepository([root, season]);
-    const provider: MetadataProvider = {
-      id: "tmdb",
-      search: vi.fn().mockResolvedValue([fakeCandidate()]),
-      fetchDetails: vi.fn().mockResolvedValue(fakeDetails()),
-    };
+    const provider = fakeProvider("tvdb");
 
-    await autoIdentifyLibrary(repo, provider);
+    await autoIdentifyLibrary(repo, { series: provider });
 
     expect(provider.search).toHaveBeenCalledTimes(1);
     expect(provider.search).toHaveBeenCalledWith({ title: "Some Movie", year: null, mediaKind: "series" });
