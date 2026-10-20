@@ -1,5 +1,6 @@
 import { loadConfig } from "@tessatv/config";
 import { type MetadataProvidersByKind, refreshLibraryMetadata } from "@tessatv/library";
+import { deriveServerId } from "@tessatv/jellyfin-compat";
 import { JobRunner } from "@tessatv/jobs";
 import { CachedMetadataProvider, TmdbClient, TmdbMetadataProvider, TvdbClient, TvdbMetadataProvider } from "@tessatv/metadata";
 import { createDatabase, DrizzleJobRepository, DrizzleLibraryRepository, DrizzleMetadataCacheRepository } from "@tessatv/persistence";
@@ -28,7 +29,11 @@ const metadataProviders: MetadataProvidersByKind = {
   ...(tvdbProvider ? { series: tvdbProvider } : {}),
 };
 
-const app = buildApp({ libraryRepository, metadataProviders });
+const app = buildApp({
+  libraryRepository,
+  metadataProviders,
+  jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },
+});
 
 const jobRunner = new JobRunner(new DrizzleJobRepository(db));
 jobRunner.register({

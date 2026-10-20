@@ -205,6 +205,9 @@ importers:
       '@tessatv/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@tessatv/jellyfin-compat':
+        specifier: workspace:*
+        version: link:../../packages/jellyfin-compat
       '@tessatv/jobs':
         specifier: workspace:*
         version: link:../../packages/jobs
@@ -258,6 +261,18 @@ importers:
 
   packages/domain: {}
 
+  packages/jellyfin-compat:
+    dependencies:
+      '@tessatv/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@tessatv/streaming':
+        specifier: workspace:*
+        version: link:../streaming
+      fastify:
+        specifier: ^5.2.0
+        version: 5.12.7
+
   packages/jobs:
     dependencies:
       '@tessatv/domain':
@@ -297,6 +312,8 @@ importers:
       drizzle-kit:
         specifier: ^0.30.1
         version: 0.30.6(supports-color@7.2.0)
+
+  packages/streaming: {}
 
 packages:
 

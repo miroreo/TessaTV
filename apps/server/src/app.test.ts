@@ -73,3 +73,17 @@ describe("GET /api/library/:id/units", () => {
     expect(response.statusCode).toBe(404);
   });
 });
+
+describe("jellyfin-compat mounting", () => {
+  it("serves Jellyfin discovery at the root, case-insensitively, alongside /api", async () => {
+    const app = buildApp({
+      metadataProviders: {},
+      libraryRepository: new InMemoryLibraryRepository(),
+      jellyfin: { serverId: "0123456789abcdef0123456789abcdef", serverName: "TessaTV" },
+    });
+    const info = await app.inject({ method: "GET", url: "/system/info/public" });
+    expect(info.statusCode).toBe(200);
+    expect(info.json()).toMatchObject({ Id: "0123456789abcdef0123456789abcdef", ProductName: "Jellyfin Server" });
+    expect((await app.inject({ method: "GET", url: "/api/library" })).statusCode).toBe(200);
+  });
+});

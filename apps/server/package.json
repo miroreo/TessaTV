@@ -13,6 +13,7 @@
   "dependencies": {
     "@tessatv/config": "workspace:*",
     "@tessatv/domain": "workspace:*",
+    "@tessatv/jellyfin-compat": "workspace:*",
     "@tessatv/jobs": "workspace:*",
     "@tessatv/library": "workspace:*",
     "@tessatv/metadata": "workspace:*",

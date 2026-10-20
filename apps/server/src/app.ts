@@ -1,4 +1,5 @@
 import type { LibraryRepository } from "@tessatv/domain";
+import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
 import type { MetadataProvidersByKind } from "@tessatv/library";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerLibraryImportRoutes } from "./routes/library-import.js";
@@ -11,10 +12,14 @@ export interface AppDependencies {
   /** Default provider per media kind — e.g. `{ movie: tmdb, series: tvdb }`. A kind with
    * no entry means that kind's metadata routes return 503 until it's configured. */
   metadataProviders: MetadataProvidersByKind;
+  /** Mounts the Jellyfin-compatible API at the root. Omitted only in tests that don't need it. */
+  jellyfin?: JellyfinCompatOptions;
 }
 
 export function buildApp(deps: AppDependencies): FastifyInstance {
-  const app = Fastify({ logger: true });
+  // Case-insensitive routing is required by Jellyfin clients (see registerJellyfinCompat);
+  // it applies router-wide, so TessaTV's own /api routes match case-insensitively too.
+  const app = Fastify({ logger: true, routerOptions: { caseSensitive: false } });
 
   app.get("/health", async () => ({ status: "ok" }));
 
@@ -22,6 +27,8 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   registerLibraryImportRoutes(app, deps.libraryRepository, deps.metadataProviders);
   registerLibraryMetadataRoutes(app, deps.libraryRepository, deps.metadataProviders);
   registerLibraryMergeRoutes(app, deps.libraryRepository, deps.metadataProviders);
+
+  if (deps.jellyfin) registerJellyfinCompat(app, deps.jellyfin);
 
   return app;
 }
