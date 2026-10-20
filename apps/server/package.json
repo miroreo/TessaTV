@@ -13,6 +13,7 @@
   "dependencies": {
     "@tessatv/config": "workspace:*",
     "@tessatv/domain": "workspace:*",
+    "@tessatv/jobs": "workspace:*",
     "@tessatv/library": "workspace:*",
     "@tessatv/metadata": "workspace:*",
     "@tessatv/persistence": "workspace:*",

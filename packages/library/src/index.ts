@@ -4,4 +4,6 @@ export * from "./parse-episode.js";
 export * from "./scan-movies.js";
 export * from "./scan-shows.js";
 export * from "./importer.js";
+export * from "./metadata-sweep.js";
 export * from "./auto-identify.js";
+export * from "./refresh-metadata.js";

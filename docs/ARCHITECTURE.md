@@ -10,17 +10,19 @@ Repo: https://github.com/miroreo/TessaTV (private).
 
 - ✅ **M1 — Core domain + persistence + manual library + minimal UI.** Done. Manual
   filesystem import works end-to-end against a real library (movies + TV).
-- ✅ **M2 — Metadata.** Both adapters done, tested, and live-verified. Default split:
-  movies → TMDB, TV → TheTVDB (TheTVDB specifically for numbering/title accuracy — live
-  sweep confirmed this: TMDB couldn't confidently match one show in the real library,
-  TheTVDB resolved it correctly to its canonical title). `?provider=`/`{provider}` on the
-  metadata routes can request the other provider explicitly. Auto-identify sweep
-  (`autoIdentifyLibrary`, `POST /api/library/auto-identify`) picks the right provider per
-  node's media kind, converges cleanly, and survives a transient provider failure on one
-  node without losing the rest of the batch (see "Non-obvious implementation notes").
-  Remaining from the original M2 scope, not yet done: wiring identification automatically
-  *into* the import flow itself (today it's always a separate manual or sweep call), and a
-  periodic metadata refresh job (needs the `jobs` package, which doesn't exist yet).
+- ✅ **M2 — Metadata.** Fully done, including both original loose ends. Both adapters
+  tested and live-verified. Default split: movies → TMDB, TV → TheTVDB (TheTVDB
+  specifically for numbering/title accuracy — live sweep confirmed this: TMDB couldn't
+  confidently match one show in the real library, TheTVDB resolved it correctly). Identify
+  is now wired automatically into import (`POST /api/library/import` runs
+  `autoIdentifyLibrary` on newly-created items as part of the same call) and
+  `packages/jobs` provides a Postgres-backed scheduler running a daily
+  `refreshLibraryMetadata` job to keep identified metadata current. Caught and fixed a real
+  bug along the way: import matched existing items by `title`, but identify overwrites
+  `title` — so re-running import after identification created an ever-growing duplicate
+  every time. Fixed with a `sourceKey` field (the stable, original scanned folder name,
+  never touched by identify) that import now matches on instead. Verified live:
+  re-importing the full real library twice in a row now gives `created: 0` both times.
 - ⬜ **M3 — Streaming + Jellyfin-compat phases 1–2.** Not started.
 - ⬜ **M4 — Acquisition pipeline, first protocol.** Not started.
 - ⬜ **M5 — Second protocol adapter.** Not started.
@@ -28,8 +30,8 @@ Repo: https://github.com/miroreo/TessaTV (private).
 - ⬜ **M7 (stretch) — second media type (Music).** Not started.
 
 Packages that exist today: `domain`, `persistence`, `config`, `library`, `metadata`
-(TMDB + TheTVDB), `apps/server`, `apps/web`. Not yet built: `indexers`,
-`download-clients`, `acquisition`, `streaming`, `jellyfin-compat`, `jobs`, `shared`.
+(TMDB + TheTVDB), `jobs`, `apps/server`, `apps/web`. Not yet built: `indexers`,
+`download-clients`, `acquisition`, `streaming`, `jellyfin-compat`, `shared`.
 
 ## Context
 
@@ -129,7 +131,7 @@ tessatv/
                           # business logic, talks to domain/streaming/library via their
                           # public interfaces
     jobs/                  # generic JobDefinition/JobRunner abstraction, Postgres-backed
-                          # polling implementation
+                          # polling implementation (done — one job registered so far)
     config/                 # typed config loading/validation (zod), secrets handling
     shared/                  # cross-cutting utils/logging/error types — kept deliberately
                           # small to avoid becoming a dumping ground
@@ -172,8 +174,19 @@ selected Release through to an imported MediaFile).
 `packages/library` scans a movies directory and a shows directory on disk and creates
 `LibraryNode`/`Unit`/`MediaFile` rows via `domain`'s `LibraryRepository` port — this is the
 M1 stand-in for the real acquisition-driven import pipeline. Idempotent: re-running
-against the same paths skips anything already imported (movies matched by title at the
-root, episodes matched by `(season, episode)` under their series/season, not by title).
+against the same paths skips anything already imported. Matching uses `LibraryNode.sourceKey`
+(the raw scanned folder name, e.g. movies by folder name at the root, series by folder
+name at the root, episodes by `(season, episode)` under their series/season) — **never**
+`title`. This was a real bug, not a design guess: once auto-identify got wired into
+import, every re-import of an already-identified item created a duplicate, because
+identify overwrites `title` with the provider's canonical name and the matching logic used
+to key on `title`. `sourceKey` is set once at creation and never touched again. One
+side effect worth knowing: two *different* source folders that happen to be the same real
+show (e.g. a library with both `Ink Master` and `Ink.Master` folders for different
+seasons) are no longer accidentally merged by a title-matching coincidence — each becomes
+its own series node, and both independently resolve to the same external id on identify.
+Deliberately not "fixed" further — merging two sources into one node is a separate,
+unrequested feature, not a correctness bug.
 
 Filename/foldername parsing is deliberately scoped to **documented, public conventions**,
 not tuned against any one library's files (that was an explicit correction mid-build —
@@ -214,6 +227,13 @@ plus auto-identify below, return `503` for a media kind with no provider configu
 `POST /api/library/auto-identify` (`autoIdentifyLibrary` in `packages/library`) sweeps
 every root node, picks the right provider for its media kind, and auto-applies the top
 search candidate — the "auto" policy built on the same primitives as the manual flow.
+`POST /api/library/import` now calls this automatically after scanning, so newly-imported
+items get identified without a separate manual call (the sweep already skips anything
+already identified, so this is cheap on every import run). `refreshLibraryMetadata`
+(same package, shares the root-node/provider-resolution helper with `autoIdentifyLibrary`
+via `listIdentifiableRoots`) re-fetches details for already-identified nodes instead of
+searching for new matches — this is what the `metadata-refresh` job (see "Jobs" below)
+runs on a schedule.
 Live-verified on the real library with both providers configured: 30 series + 26 movies,
 0 errors, 0 no-matches. Concretely validated the TMDB→TheTVDB rationale in the same run:
 one show ("...2018" baked into the title, no parens-year) had no confident TMDB match but
@@ -270,12 +290,19 @@ negotiation + HLS delivery + progress reporting, (5) deeper coverage (resume/wat
 collections, playlists, favorites, search). Live TV is out of scope (different acquisition
 model entirely) — stub as unsupported.
 
-### Jobs (not yet built)
+### Jobs (done — metadata refresh; more job types come with acquisition)
 
-Generic `JobDefinition` (name, handler, trigger, concurrency/retry policy) + `JobRunner`
-port, Postgres-backed polling implementation (jobs table, `next_run_at`, advisory locks for
-single-instance safety). Indexer polling, download-status monitoring, library scans, and
-metadata refresh all register `JobDefinition`s rather than using ad hoc timers.
+`packages/jobs`' `JobRunner` takes a `JobRepository` port (implemented by
+`DrizzleJobRepository` against a `scheduled_job` table — `next_run_at`/`last_run_at`/
+`last_error` per named job) and any number of registered `JobDefinition`s (`name`,
+`intervalMs`, `handler`). `next_run_at` persists across restarts instead of resetting to
+"run now" every boot. One job failing is recorded in `last_error` and does not block any
+other due job in the same tick — the same per-item isolation lesson the auto-identify
+sweep already needed, applied proactively here from the start. `apps/server` registers one
+job today, `metadata-refresh` (daily, matching `CachedMetadataProvider`'s TTL), running
+`refreshLibraryMetadata` from `packages/library`. Indexer polling and download-status
+monitoring will register their own `JobDefinition`s the same way once `acquisition` exists
+— no changes needed to `JobRunner` itself.
 
 ## Roadmap
 
@@ -357,6 +384,14 @@ curl -X POST http://localhost:8096/api/library/<id>/metadata/identify \
 
 # Auto-identify every un-identified item in the library at once
 curl -X POST http://localhost:8096/api/library/auto-identify
+
+# Wipe library data for a clean re-import (dev only — does not touch scheduled_job)
+docker exec docker-postgres-1 psql -U tessatv -d tessatv -c \
+  "TRUNCATE TABLE media_file, unit, library_node, external_id, metadata_cache RESTART IDENTITY CASCADE;"
+
+# Force a registered job to run on its next ~60s poll tick instead of waiting for its schedule
+docker exec docker-postgres-1 psql -U tessatv -d tessatv -c \
+  "UPDATE scheduled_job SET next_run_at = now() WHERE name = 'metadata-refresh';"
 ```
 
 `.env` (git-ignored) needs `DATABASE_URL`, `APP_SECRET` (32+ chars), and optionally
@@ -386,3 +421,13 @@ its task graph, so relying on `source .env` alone silently breaks under `turbo w
 - Don't trust a running dev server's behavior as proof the latest code is deployed —
   verify the response shape itself changed (e.g. a new field you just added) before
   trusting live-test results, exactly because of the above.
+- Any field whose job is "stable identity for matching" (like `LibraryNode.sourceKey`)
+  must be verified by writing to it once and then *mutating a different field* (like
+  `title`) and re-running the matching logic — a test that only ever creates fresh rows
+  can't catch a matching bug that only shows up after something else changes the row.
+  The `sourceKey` bug shipped past the original test suite for exactly this reason: every
+  existing test created-then-asserted, never created-then-renamed-then-rematched.
+- When a migration needs a new `NOT NULL` column and there's no sane default, check
+  whether the affected tables can just be emptied first (dev data, nothing externally
+  referenced) rather than engineering a backfill — `TRUNCATE ... CASCADE` then migrate is
+  simpler and more honest than a default value that's wrong for already-written rows.

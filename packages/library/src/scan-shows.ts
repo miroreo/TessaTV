@@ -15,6 +15,9 @@ export interface ScannedEpisode {
 
 export interface ScannedSeries {
   readonly title: string;
+  /** Raw scanned folder name — a stable identity for matching on re-import, since `title`
+   * gets overwritten with a provider's canonical name once this series is identified. */
+  readonly folderName: string;
   readonly episodes: readonly ScannedEpisode[];
 }
 
@@ -73,7 +76,7 @@ export async function scanShowsDirectory(rootPath: string): Promise<ScanShowsRes
     const seriesPath = join(rootPath, entry.name);
     const episodes = dedupeBySeasonEpisode(await findEpisodeFiles(seriesPath));
     if (episodes.length === 0) continue;
-    series.push({ title: normalizeSeriesTitle(entry.name), episodes });
+    series.push({ title: normalizeSeriesTitle(entry.name), folderName: entry.name, episodes });
   }
 
   return { series };

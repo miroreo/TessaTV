@@ -6,6 +6,9 @@ import { fileExtension, isVideoFile } from "./video-extensions.js";
 export interface ScannedMovie {
   readonly title: string;
   readonly year: number | null;
+  /** Raw scanned folder name — a stable identity for matching on re-import, since `title`
+   * gets overwritten with a provider's canonical name once this movie is identified. */
+  readonly folderName: string;
   readonly filePath: string;
   readonly sizeBytes: number;
   readonly container: string;
@@ -65,6 +68,7 @@ export async function scanMoviesDirectory(rootPath: string): Promise<ScanMoviesR
     movies.push({
       title,
       year,
+      folderName: entry.name,
       filePath: largest.path,
       sizeBytes: largest.sizeBytes,
       container: fileExtension(largest.path),

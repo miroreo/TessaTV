@@ -15,6 +15,20 @@
       "when": 1792460982790,
       "tag": "0001_polite_titanium_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792465594997,
+      "tag": "0002_special_hydra",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792481580644,
+      "tag": "0003_bouncy_gressill",
+      "breakpoints": true
     }
   ]
 }

@@ -29,7 +29,13 @@ describe("scanMoviesDirectory", () => {
     const result = await scanMoviesDirectory(root);
 
     expect(result.movies).toEqual([
-      expect.objectContaining({ title: "Some Movie", year: 2000, container: "mkv", sizeBytes: 100 }),
+      expect.objectContaining({
+        title: "Some Movie",
+        year: 2000,
+        folderName: "Some Movie (2000)",
+        container: "mkv",
+        sizeBytes: 100,
+      }),
     ]);
     expect(result.skipped).toEqual([]);
   });

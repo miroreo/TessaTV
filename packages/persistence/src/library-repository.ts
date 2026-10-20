@@ -34,6 +34,7 @@ export class DrizzleLibraryRepository implements LibraryRepository {
       parentId: node.parentId,
       title: node.title,
       sortTitle: node.sortTitle,
+      sourceKey: node.sourceKey,
       monitored: node.monitored,
       qualityProfileId: node.qualityProfileId,
       createdAt: node.createdAt,

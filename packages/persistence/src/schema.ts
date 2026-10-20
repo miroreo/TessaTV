@@ -22,6 +22,7 @@ export const libraryNode = pgTable("library_node", {
   parentId: uuid("parent_id"),
   title: text("title").notNull(),
   sortTitle: text("sort_title").notNull(),
+  sourceKey: text("source_key").notNull(),
   monitored: boolean("monitored").notNull().default(true),
   qualityProfileId: uuid("quality_profile_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -99,3 +100,12 @@ export const metadataCache = pgTable(
   },
   (table) => [primaryKey({ columns: [table.provider, table.externalId] })],
 );
+
+/** Scheduling state for named background jobs — persisted so `next_run_at` survives an app
+ * restart instead of resetting to "run immediately" every time the process starts. */
+export const scheduledJob = pgTable("scheduled_job", {
+  name: text("name").primaryKey(),
+  nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  lastError: text("last_error"),
+});

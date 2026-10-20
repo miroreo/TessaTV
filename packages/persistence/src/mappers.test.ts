@@ -18,6 +18,7 @@ describe("toDomainLibraryNode", () => {
         parentId: null,
         title: "Example Movie",
         sortTitle: "example movie",
+        sourceKey: "Example Movie (1999)",
         monitored: true,
         qualityProfileId: null,
         createdAt: now,
@@ -27,6 +28,7 @@ describe("toDomainLibraryNode", () => {
     );
 
     expect(node.kind).toBe("leaf");
+    expect(node.sourceKey).toBe("Example Movie (1999)");
     expect(node.externalIds).toHaveLength(1);
     expect(node.externalIds[0]?.provider).toBe("tmdb");
   });

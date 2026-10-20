@@ -43,9 +43,11 @@ class InMemoryLibraryRepository implements LibraryRepository {
 }
 
 function sampleMovie(overrides: Partial<ScannedMovie> = {}): ScannedMovie {
+  const title = overrides.title ?? `Sample Movie ${randomUUID().slice(0, 8)}`;
   return {
-    title: `Sample Movie ${randomUUID().slice(0, 8)}`,
+    title,
     year: 2000,
+    folderName: `${title} (2000)`,
     filePath: "/library/movies/sample/movie.mkv",
     sizeBytes: 1_000_000,
     container: "mkv",
@@ -83,10 +85,25 @@ describe("importMovies", () => {
     expect(second).toEqual({ created: 0, skipped: 1 });
     expect(await repo.listChildren(null)).toHaveLength(1);
   });
+
+  it("still matches by folderName after the node's title has been overwritten (e.g. by identify) — the sourceKey bug fix", async () => {
+    const repo = new InMemoryLibraryRepository();
+    const movie = sampleMovie({ title: "Example Movie" });
+
+    await importMovies(repo, [movie]);
+    const [node] = await repo.listChildren(null);
+    // Simulate what auto-identify does: overwrite the display title, leave sourceKey alone.
+    await repo.updateNode({ ...node!, title: "TMDB Canonical Title", sortTitle: "tmdb canonical title" });
+
+    const second = await importMovies(repo, [movie]);
+
+    expect(second).toEqual({ created: 0, skipped: 1 });
+    expect(await repo.listChildren(null)).toHaveLength(1);
+  });
 });
 
 function sampleSeries(episodes: ScannedSeries["episodes"], title = "Example Series"): ScannedSeries {
-  return { title, episodes };
+  return { title, folderName: title, episodes };
 }
 
 describe("importShows", () => {
@@ -123,5 +140,23 @@ describe("importShows", () => {
     const second = await importShows(repo, [sampleSeries(episodes)]);
 
     expect(second).toEqual({ created: 0, skipped: 1 });
+  });
+
+  it("still matches the series by folderName after its title has been overwritten (e.g. by identify) — the sourceKey bug fix", async () => {
+    const repo = new InMemoryLibraryRepository();
+    const episodes: ScannedSeries["episodes"] = [
+      { season: 1, episode: 1, title: "First", filePath: "/s1e1.mkv", sizeBytes: 100, container: "mkv" },
+    ];
+    const series = sampleSeries(episodes, "Example Series");
+
+    await importShows(repo, [series]);
+    const [seriesNode] = await repo.listChildren(null);
+    // Simulate what auto-identify does: overwrite the display title, leave sourceKey alone.
+    await repo.updateNode({ ...seriesNode!, title: "TVDB Canonical Title", sortTitle: "tvdb canonical title" });
+
+    const second = await importShows(repo, [series]);
+
+    expect(second).toEqual({ created: 0, skipped: 1 });
+    expect(await repo.listChildren(null)).toHaveLength(1);
   });
 });

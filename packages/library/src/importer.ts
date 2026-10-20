@@ -8,13 +8,19 @@ export interface ImportCounts {
   readonly skipped: number;
 }
 
-async function findChildByTitle(
+/**
+ * Matches on `sourceKey`, never `title` — `title` gets overwritten with a provider's
+ * canonical name on identify, so matching re-import scans against it would silently create
+ * a duplicate node every time a previously-identified item's folder is rescanned (this
+ * happened in practice before `sourceKey` existed).
+ */
+async function findChildBySourceKey(
   repository: LibraryRepository,
   parentId: string | null,
-  title: string,
+  sourceKey: string,
 ): Promise<LibraryNode | null> {
   const children = await repository.listChildren(parentId);
-  return children.find((child) => child.title.toLowerCase() === title.toLowerCase()) ?? null;
+  return children.find((child) => child.sourceKey === sourceKey) ?? null;
 }
 
 async function findEpisodeNodeBySequence(
@@ -40,6 +46,7 @@ async function createLeafWithFile(
     parentId: string | null;
     mediaType: string;
     title: string;
+    sourceKey: string;
     sequence: readonly number[];
     filePath: string;
     sizeBytes: number;
@@ -55,6 +62,7 @@ async function createLeafWithFile(
     parentId: params.parentId,
     title: params.title,
     sortTitle: params.title.toLowerCase(),
+    sourceKey: params.sourceKey,
     externalIds: [],
     monitored: true,
     qualityProfileId: null,
@@ -102,8 +110,9 @@ async function findOrCreateCollection(
   parentId: string | null,
   mediaType: string,
   title: string,
+  sourceKey: string,
 ): Promise<LibraryNode> {
-  const existing = await findChildByTitle(repository, parentId, title);
+  const existing = await findChildBySourceKey(repository, parentId, sourceKey);
   if (existing) return existing;
 
   const now = new Date();
@@ -114,6 +123,7 @@ async function findOrCreateCollection(
     parentId,
     title,
     sortTitle: title.toLowerCase(),
+    sourceKey,
     externalIds: [],
     monitored: true,
     qualityProfileId: null,
@@ -133,7 +143,7 @@ export async function importMovies(
   let skipped = 0;
 
   for (const movie of movies) {
-    const existing = await findChildByTitle(repository, null, movie.title);
+    const existing = await findChildBySourceKey(repository, null, movie.folderName);
     if (existing) {
       skipped++;
       continue;
@@ -143,6 +153,7 @@ export async function importMovies(
       parentId: null,
       mediaType: "movie",
       title: movie.title,
+      sourceKey: movie.folderName,
       sequence: [],
       filePath: movie.filePath,
       sizeBytes: movie.sizeBytes,
@@ -163,14 +174,20 @@ export async function importShows(
   let skipped = 0;
 
   for (const show of series) {
-    const seriesNode = await findOrCreateCollection(repository, null, "series", show.title);
+    const seriesNode = await findOrCreateCollection(repository, null, "series", show.title, show.folderName);
 
     const seasonNumbers = Array.from(new Set(show.episodes.map((episode) => episode.season))).sort((a, b) => a - b);
     const seasonNodeByNumber = new Map<number, LibraryNode>();
     for (const seasonNumber of seasonNumbers) {
       seasonNodeByNumber.set(
         seasonNumber,
-        await findOrCreateCollection(repository, seriesNode.id, "series", `Season ${seasonNumber}`),
+        await findOrCreateCollection(
+          repository,
+          seriesNode.id,
+          "series",
+          `Season ${seasonNumber}`,
+          `season:${seasonNumber}`,
+        ),
       );
     }
 
@@ -188,6 +205,7 @@ export async function importShows(
         parentId: seasonNode.id,
         mediaType: "series",
         title: episode.title,
+        sourceKey: `episode:${episode.season}:${episode.episode}`,
         sequence: [episode.season, episode.episode],
         filePath: episode.filePath,
         sizeBytes: episode.sizeBytes,

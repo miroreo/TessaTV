@@ -1,0 +1,1 @@
+ALTER TABLE "library_node" ADD COLUMN "source_key" text NOT NULL;

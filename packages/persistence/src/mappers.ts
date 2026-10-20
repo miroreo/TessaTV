@@ -13,6 +13,7 @@ export function toDomainLibraryNode(
     parentId: row.parentId,
     title: row.title,
     sortTitle: row.sortTitle,
+    sourceKey: row.sourceKey,
     externalIds,
     monitored: row.monitored,
     qualityProfileId: row.qualityProfileId,

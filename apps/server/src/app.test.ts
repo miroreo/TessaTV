@@ -10,6 +10,7 @@ function fakeNode(overrides: Partial<LibraryNode> = {}): LibraryNode {
     parentId: null,
     title: "Example Movie",
     sortTitle: "example movie",
+    sourceKey: "Example Movie (1999)",
     externalIds: [],
     monitored: true,
     qualityProfileId: null,

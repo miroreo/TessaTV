@@ -16,6 +16,14 @@ export interface LibraryNode {
   readonly parentId: string | null;
   readonly title: string;
   readonly sortTitle: string;
+  /**
+   * A stable identity for matching this node back to where it came from (e.g. the scanned
+   * folder name), set once at creation and never touched by identification. `title` gets
+   * overwritten with a provider's canonical name on identify — matching new import scans
+   * against `title` instead of this would silently create a duplicate node every time a
+   * previously-identified item's folder is rescanned.
+   */
+  readonly sourceKey: string;
   readonly externalIds: readonly ExternalId[];
   readonly monitored: boolean;
   readonly qualityProfileId: string | null;

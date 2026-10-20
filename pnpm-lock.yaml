@@ -205,6 +205,9 @@ importers:
       '@tessatv/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@tessatv/jobs':
+        specifier: workspace:*
+        version: link:../../packages/jobs
       '@tessatv/library':
         specifier: workspace:*
         version: link:../../packages/library
@@ -254,6 +257,12 @@ importers:
         version: 3.25.76
 
   packages/domain: {}
+
+  packages/jobs:
+    dependencies:
+      '@tessatv/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/library:
     dependencies:

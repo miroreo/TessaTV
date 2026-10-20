@@ -1,10 +1,6 @@
 import type { LibraryNode, LibraryRepository } from "@tessatv/domain";
 import type { MetadataMediaKind, MetadataProvider } from "@tessatv/metadata";
-import { toMetadataMediaKind } from "@tessatv/metadata";
-
-/** Which provider to use for each media kind, e.g. `{ movie: tmdbProvider, series: tvdbProvider }`.
- * A media kind with no entry (or `undefined`) is skipped rather than erroring. */
-export type MetadataProvidersByKind = Partial<Record<MetadataMediaKind, MetadataProvider>>;
+import { listIdentifiableRoots, type MetadataProvidersByKind } from "./metadata-sweep.js";
 
 export interface AutoIdentifyMatch {
   readonly nodeId: string;
@@ -70,10 +66,9 @@ async function identifyOne(
 }
 
 /**
- * Sweeps every root-level library node (movies, top-level series — `listChildren(null)`
- * only ever returns roots) that doesn't already have an external id from its kind's
- * provider, searches by title, and auto-applies the top-ranked candidate. Movies and
- * series can use different providers (e.g. TMDB for movies, TheTVDB for TV numbering
+ * Sweeps every root-level library node that doesn't already have an external id from its
+ * kind's provider, searches by title, and auto-applies the top-ranked candidate. Movies
+ * and series can use different providers (e.g. TMDB for movies, TheTVDB for TV numbering
  * accuracy) — nothing here is provider-specific, so adding a third media kind/provider
  * later needs no changes beyond a new map entry.
  *
@@ -85,23 +80,13 @@ export async function autoIdentifyLibrary(
   repository: LibraryRepository,
   providers: MetadataProvidersByKind,
 ): Promise<AutoIdentifySummary> {
-  const roots = await repository.listChildren(null);
+  const { roots, unavailable } = await listIdentifiableRoots(repository, providers);
   const identified: AutoIdentifyMatch[] = [];
   const noMatch: AutoIdentifyMiss[] = [];
   const errors: AutoIdentifyError[] = [];
   let alreadyIdentified = 0;
-  let unavailable = 0;
 
-  for (const node of roots) {
-    const mediaKind = toMetadataMediaKind(node.mediaType);
-    if (!mediaKind) continue;
-
-    const provider = providers[mediaKind];
-    if (!provider) {
-      unavailable++;
-      continue;
-    }
-
+  for (const { node, mediaKind, provider } of roots) {
     if (node.externalIds.some((externalId) => externalId.provider === provider.id)) {
       alreadyIdentified++;
       continue;

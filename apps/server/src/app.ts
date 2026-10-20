@@ -18,7 +18,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   app.get("/health", async () => ({ status: "ok" }));
 
   registerLibraryRoutes(app, deps.libraryRepository);
-  registerLibraryImportRoutes(app, deps.libraryRepository);
+  registerLibraryImportRoutes(app, deps.libraryRepository, deps.metadataProviders);
   registerLibraryMetadataRoutes(app, deps.libraryRepository, deps.metadataProviders);
 
   return app;
