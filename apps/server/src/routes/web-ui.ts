@@ -1,10 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 
 /** SvelteKit adapter-node's `handler` export: a Connect-style middleware. */
 export type NodeRequestHandler = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
-
-export const WEB_UI_BASE_PATH = "/web";
 
 /**
  * adapter-node assumes `https` unless told otherwise via a configurable header, which broke
@@ -30,24 +28,28 @@ export async function loadWebUiHandler(specifier = "@tessatv/web/handler"): Prom
 }
 
 /**
- * Mounts TessaTV's own UI under `/web` and redirects `/` there. Jellyfin Mobile opens the
- * server root in its web view after validating `/System/Info/Public`, so the root has to
- * land on a real UI — the same `/` → `/web` layout real Jellyfin servers use.
+ * Serves TessaTV's own UI from the server root. Jellyfin Mobile opens the root in its web
+ * view after validating `/System/Info/Public`, and the UI detects its injected
+ * `window.NativeShell` hooks from there.
+ *
+ * Mounted as Fastify's not-found handler so every explicit route (`/api`, `/health`, the
+ * Jellyfin routes) wins, and anything else falls through to SvelteKit. Because routing is
+ * case-insensitive for Jellyfin's sake, UI page paths must not collide with Jellyfin's
+ * route names (`/Items`, `/Users`, `/System`, …) in any casing.
  *
  * GET/HEAD only: the UI talks to `/api` with JSON, never SvelteKit form actions, and a
  * hijacked POST body would already have been consumed by Fastify's body parser.
  */
 export function registerWebUiRoutes(app: FastifyInstance, handler: NodeRequestHandler): void {
-  app.get("/", async (_request, reply) => reply.redirect(`${WEB_UI_BASE_PATH}/`));
-
-  const serve = (request: FastifyRequest, reply: FastifyReply) => {
+  app.setNotFoundHandler((request, reply) => {
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return reply.code(404).send({ error: "not_found" });
+    }
     reply.hijack();
     request.raw.headers[PROTOCOL_HEADER] = request.protocol;
     handler(request.raw, reply.raw, () => {
       reply.raw.statusCode = 404;
       reply.raw.end("Not found");
     });
-  };
-  app.get(WEB_UI_BASE_PATH, serve);
-  app.get(`${WEB_UI_BASE_PATH}/*`, serve);
+  });
 }

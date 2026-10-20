@@ -91,22 +91,32 @@ describe("jellyfin-compat mounting", () => {
 
 describe("web UI mounting", () => {
   const webUiHandler: NodeRequestHandler = (req, res, next) => {
-    if (req.url === "/web/missing") return next();
+    if (req.url === "/missing") return next();
     res.setHeader("content-type", "text/html");
     res.end(`<p>ui:${req.url}</p>`);
   };
   const app = () =>
-    buildApp({ metadataProviders: {}, libraryRepository: new InMemoryLibraryRepository(), webUiHandler });
+    buildApp({
+      metadataProviders: {},
+      libraryRepository: new InMemoryLibraryRepository(),
+      jellyfin: { serverId: "0123456789abcdef0123456789abcdef", serverName: "TessaTV" },
+      webUiHandler,
+    });
 
-  it("redirects the root to /web, where Jellyfin Mobile's web view lands", async () => {
-    const response = await app().inject({ method: "GET", url: "/" });
-    expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toBe("/web/");
+  it("serves the UI at the root, where Jellyfin Mobile's web view lands", async () => {
+    expect((await app().inject({ method: "GET", url: "/" })).body).toBe("<p>ui:/</p>");
+    expect((await app().inject({ method: "GET", url: "/library/abc?x=1" })).body).toBe("<p>ui:/library/abc?x=1</p>");
+    expect((await app().inject({ method: "GET", url: "/_app/immutable/start.js" })).body).toBe(
+      "<p>ui:/_app/immutable/start.js</p>",
+    );
   });
 
-  it("hands /web and everything under it to the SvelteKit handler", async () => {
-    expect((await app().inject({ method: "GET", url: "/web" })).body).toBe("<p>ui:/web</p>");
-    expect((await app().inject({ method: "GET", url: "/web/library?x=1" })).body).toBe("<p>ui:/web/library?x=1</p>");
+  it("leaves explicit routes to Fastify", async () => {
+    expect((await app().inject({ method: "GET", url: "/api/library" })).json()).toEqual({ items: [] });
+    expect((await app().inject({ method: "GET", url: "/health" })).json()).toEqual({ status: "ok" });
+    expect((await app().inject({ method: "GET", url: "/System/Info/Public" })).json()).toMatchObject({
+      ProductName: "Jellyfin Server",
+    });
   });
 
   it("tells SvelteKit the real protocol, ignoring a client-supplied header", async () => {
@@ -116,15 +126,12 @@ describe("web UI mounting", () => {
       res.end();
     };
     const spyApp = buildApp({ metadataProviders: {}, libraryRepository: new InMemoryLibraryRepository(), webUiHandler: spy });
-    await spyApp.inject({ method: "GET", url: "/web/", headers: { "x-tessatv-forwarded-proto": "https" } });
+    await spyApp.inject({ method: "GET", url: "/", headers: { "x-tessatv-forwarded-proto": "https" } });
     expect(seen).toBe("http");
   });
 
-  it("404s when SvelteKit passes on a request", async () => {
-    expect((await app().inject({ method: "GET", url: "/web/missing" })).statusCode).toBe(404);
-  });
-
-  it("leaves /api to Fastify", async () => {
-    expect((await app().inject({ method: "GET", url: "/api/library" })).json()).toEqual({ items: [] });
+  it("404s when SvelteKit passes on a request, and for non-GET unknown routes", async () => {
+    expect((await app().inject({ method: "GET", url: "/missing" })).statusCode).toBe(404);
+    expect((await app().inject({ method: "POST", url: "/nope" })).statusCode).toBe(404);
   });
 });

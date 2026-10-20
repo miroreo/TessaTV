@@ -6,9 +6,6 @@ const config = {
   preprocess: vitePreprocess(),
   kit: {
     adapter: adapter(),
-    // Served by apps/server under /web (Jellyfin's own web-client path — Jellyfin Mobile
-    // loads the server root, which redirects here).
-    paths: { base: "/web" },
   },
 };
 

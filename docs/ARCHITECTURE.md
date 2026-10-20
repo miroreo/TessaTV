@@ -47,7 +47,7 @@ Repo: https://github.com/miroreo/TessaTV (private).
   encodes ~1.7–3.5× faster than software with first playlist ready in ~0.4–1.0s. Not yet
   wired into `apps/server`. `jellyfin-compat` exists with discovery only
   (`/System/Info/Public`, `/System/Ping`); the SvelteKit UI is served by the Node process
-  at `/web` (root redirects there) — see the Jellyfin Mobile decision below for why. **Next:
+  at the root — see the Jellyfin Mobile decision below for why. **Next:
   auth (first-run setup + login), then gating `/api`, then a playback API + player.** Live client testing is the plan
   for the compat phase: the dev server's `PORT` was moved to **8080** (still binds
   `0.0.0.0`) specifically so the official Jellyfin iOS app can connect to this machine
@@ -104,8 +104,11 @@ The explicit goals driving every structural choice below:
   server root in a web view with injected `window.NativeShell` hooks (native video/audio
   player via `ExpoVideoPlayer.play {url, backdropUrl}`, fullscreen, a Jellyfin device
   profile in `window.ExpoVideoProfile`). It does not need jellyfin-web — any page works.
-  Chosen over serving the stock jellyfin-web bundle: the SvelteKit UI is served at `/web`
-  (root redirects there, like real Jellyfin) and calls the NativeShell hooks when present.
+  Chosen over serving the stock jellyfin-web bundle: the SvelteKit UI is served at the
+  server root (explicit Fastify routes — `/api`, `/health`, Jellyfin's routes — win; any
+  other GET falls through to SvelteKit) and calls the NativeShell hooks when present. Since
+  routing is case-insensitive for Jellyfin clients, UI page paths must never collide with
+  Jellyfin route names (`/Items`, `/Users`, `/System`, …).
   Consequence: for M3, Jellyfin Mobile exercises only the compat layer's discovery
   endpoint; the Jellyfin REST surface (Jellyfin-style login/browse/playback) is deferred
   until a native REST client (Swiftfin, Infuse) is targeted.
@@ -403,7 +406,7 @@ watchable player working sooner, before both acquisition protocols are complete:
 - **M2 — Metadata.** ✅ Done.
 - **M3 — Streaming + watchable in Jellyfin Mobile.** `streaming`'s `PlaybackPlan`/
   `TranscodeSession` (including hardware-accel strategy selection), Jellyfin discovery,
-  first-run setup + login, and TessaTV's own UI at `/web` with browse, direct play and HLS
+  first-run setup + login, and TessaTV's own UI at the root with browse, direct play and HLS
   transcode — using Jellyfin Mobile's native player when running inside it — enough for
   the official Jellyfin iOS app to connect, log in, browse, and play content end-to-end.
   This is the "watchable" milestone. (Jellyfin REST phases moved later — see Decisions.)
@@ -456,8 +459,8 @@ pnpm --filter @tessatv/persistence db:migrate
 
 # Hot-reload dev loop for the server + web app (rebuilds/restarts on any dependency change)
 pnpm exec turbo watch dev --filter=@tessatv/server --filter=@tessatv/web
-# server: http://localhost:8080 (also serves the built UI at /web)
-# web (vite HMR): http://localhost:5173/web (proxies /api to the server)
+# server: http://localhost:8080 (also serves the built UI at /)
+# web (vite HMR): http://localhost:5173 (proxies /api to the server)
 
 # Build + test everything
 pnpm turbo run build test
@@ -516,7 +519,7 @@ turbo run test` fails only on that one file.
   patched to fit one library's files — that distinction was an explicit course-correction
   mid-build.
 - `apps/server` serves the UI by importing `@tessatv/web/handler` (SvelteKit adapter-node's
-  built handler) — so `/web` on :8080 shows the last *build*, not the vite dev server.
+  built handler) as Fastify's not-found handler — so the UI on :8080 shows the last *build*, not the vite dev server.
   adapter-node assumes `https` unless a protocol header says otherwise, which made SSR's
   same-origin `fetch("/api/...")` fail over plain-HTTP LAN; the server now always sets
   `x-tessatv-forwarded-proto` from Fastify's own view of the connection (so clients can't

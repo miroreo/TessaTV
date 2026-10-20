@@ -15,7 +15,7 @@ export interface AppDependencies {
   metadataProviders: MetadataProvidersByKind;
   /** Mounts the Jellyfin-compatible API at the root. Omitted only in tests that don't need it. */
   jellyfin?: JellyfinCompatOptions;
-  /** SvelteKit's built handler, served under /web. Omitted when the web app isn't built. */
+  /** SvelteKit's built handler, served at the root for any path no explicit route claims. Omitted when the web app isn't built. */
   webUiHandler?: NodeRequestHandler;
 }
 

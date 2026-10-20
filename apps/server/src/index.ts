@@ -55,7 +55,7 @@ app
   .listen({ port: config.PORT, host: "0.0.0.0" })
   .then(async () => {
     app.log.info(`TessaTV server listening on port ${config.PORT}`);
-    if (!webUiHandler) app.log.warn("Web UI build not found — run `pnpm --filter @tessatv/web build`; /web will 404 until then");
+    if (!webUiHandler) app.log.warn("Web UI build not found — run `pnpm --filter @tessatv/web build`; the UI will 404 until then");
     if (!tmdbProvider) app.log.warn("TMDB_API_KEY not set — movie metadata routes will return 503 until it is configured");
     if (!tvdbProvider) app.log.warn("TVDB_API_KEY not set — series metadata routes will return 503 until it is configured");
     await jobRunner.start();
