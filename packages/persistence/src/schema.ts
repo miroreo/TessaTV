@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
  * One generic tree table for every media type's browsable entries (Movie, Series, Season).
@@ -109,3 +110,34 @@ export const scheduledJob = pgTable("scheduled_job", {
   lastRunAt: timestamp("last_run_at", { withTimezone: true }),
   lastError: text("last_error"),
 });
+
+/** `user` is reserved in Postgres, hence `app_user`. One account table for TessaTV's UI and
+ * Jellyfin-API clients alike. */
+export const appUser = pgTable(
+  "app_user",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    username: text("username").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    isAdmin: boolean("is_admin").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("app_user_username_lower").on(sql`lower(${table.username})`)],
+);
+
+/** Only the SHA-256 of each bearer token is stored; deleting a row revokes that session. */
+export const authSession = pgTable(
+  "auth_session",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUser.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    clientName: text("client_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("auth_session_token_hash").on(table.tokenHash)],
+);

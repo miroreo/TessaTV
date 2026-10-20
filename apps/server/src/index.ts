@@ -1,9 +1,17 @@
+import { AuthService } from "@tessatv/auth";
 import { loadConfig } from "@tessatv/config";
 import { type MetadataProvidersByKind, refreshLibraryMetadata } from "@tessatv/library";
 import { deriveServerId } from "@tessatv/jellyfin-compat";
 import { JobRunner } from "@tessatv/jobs";
 import { CachedMetadataProvider, TmdbClient, TmdbMetadataProvider, TvdbClient, TvdbMetadataProvider } from "@tessatv/metadata";
-import { createDatabase, DrizzleJobRepository, DrizzleLibraryRepository, DrizzleMetadataCacheRepository } from "@tessatv/persistence";
+import {
+  createDatabase,
+  DrizzleAuthSessionRepository,
+  DrizzleJobRepository,
+  DrizzleLibraryRepository,
+  DrizzleMetadataCacheRepository,
+  DrizzleUserRepository,
+} from "@tessatv/persistence";
 import { buildApp } from "./app.js";
 import { loadWebUiHandler } from "./routes/web-ui.js";
 
@@ -13,6 +21,7 @@ const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
 const libraryRepository = new DrizzleLibraryRepository(db);
 const metadataCacheRepository = new DrizzleMetadataCacheRepository(db);
+const auth = new AuthService(new DrizzleUserRepository(db), new DrizzleAuthSessionRepository(db));
 
 const tmdbProvider = config.TMDB_API_KEY
   ? new CachedMetadataProvider(new TmdbMetadataProvider(new TmdbClient({ apiKey: config.TMDB_API_KEY })), metadataCacheRepository)
@@ -33,6 +42,7 @@ const metadataProviders: MetadataProvidersByKind = {
 const webUiHandler = await loadWebUiHandler();
 
 const app = buildApp({
+  auth,
   libraryRepository,
   metadataProviders,
   jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },

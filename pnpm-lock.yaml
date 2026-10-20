@@ -199,6 +199,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@tessatv/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@tessatv/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -255,6 +258,12 @@ importers:
       vite:
         specifier: ^6.0.3
         version: 6.4.4(@types/node@22.20.5)(tsx@4.23.15)
+
+  packages/auth:
+    dependencies:
+      '@tessatv/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/config:
     dependencies:

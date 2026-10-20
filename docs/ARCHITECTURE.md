@@ -47,8 +47,11 @@ Repo: https://github.com/miroreo/TessaTV (private).
   encodes ~1.7–3.5× faster than software with first playlist ready in ~0.4–1.0s. Not yet
   wired into `apps/server`. `jellyfin-compat` exists with discovery only
   (`/System/Info/Public`, `/System/Ping`); the SvelteKit UI is served by the Node process
-  at the root — see the Jellyfin Mobile decision below for why. **Next:
-  auth (first-run setup + login), then gating `/api`, then a playback API + player.** Live client testing is the plan
+  at the root — see the Jellyfin Mobile decision below for why. **Auth is built** (see
+  "Auth" below): first-run setup page, login/logout, and every `/api` route locked behind
+  a session — verified end-to-end in headless Chromium against a throwaway database.
+  **Next: a playback API + player** (direct play / HLS via `streaming`, Jellyfin Mobile's
+  native player when inside the app, hls.js otherwise). Live client testing is the plan
   for the compat phase: the dev server's `PORT` was moved to **8080** (still binds
   `0.0.0.0`) specifically so the official Jellyfin iOS app can connect to this machine
   over LAN (`http://10.8.128.8:8080`) or Tailscale (`http://100.97.251.108:8080`) as each
@@ -63,8 +66,9 @@ Repo: https://github.com/miroreo/TessaTV (private).
 - ⬜ **M7 (stretch) — second media type (Music).** Not started.
 
 Packages that exist today: `domain`, `persistence`, `config`, `library`, `metadata`
-(TMDB + TheTVDB), `jobs`, `streaming`, `apps/server`, `apps/web`. Not yet built:
-`indexers`, `download-clients`, `acquisition`, `jellyfin-compat`, `shared`.
+(TMDB + TheTVDB), `jobs`, `streaming`, `auth`, `jellyfin-compat` (discovery only),
+`apps/server`, `apps/web`. Not yet built: `indexers`, `download-clients`, `acquisition`,
+`shared`.
 
 ## Context
 
@@ -141,8 +145,10 @@ The explicit goals driving every structural choice below:
   yet implemented — no indexer/download-client credentials exist yet; revisit at M4.)
 - Auth: **one shared user table** — a TessaTV account IS the Jellyfin-facing user; the
   compat layer issues Jellyfin-shaped tokens (`X-MediaBrowser-Token`) against the same
-  account rather than maintaining a second parallel user system. (Not yet implemented —
-  no auth exists yet; relevant starting at M3.)
+  account rather than maintaining a second parallel user system. Accounts/sessions live in
+  `packages/auth` (decided 2026-10-20), used by `apps/server` now and by `jellyfin-compat`
+  later (the lint boundary already allows it). Jellyfin-shaped tokens aren't issued yet —
+  no Jellyfin REST client is targeted in M3.
 - Dev environment: **Nix flake** (`flake.nix`) provides Node 22, pnpm, ffmpeg, and the
   Postgres client — `nix develop` before running any project command. Not an original
   locked decision, but a hard requirement of the actual dev machine.
@@ -383,6 +389,34 @@ negotiation + HLS delivery + progress reporting, (5) deeper coverage (resume/wat
 collections, playlists, favorites, search). Live TV is out of scope (different acquisition
 model entirely) — stub as unsupported.
 
+### Auth (built)
+
+`domain` defines `User`/`AuthSession` and the `UserRepository`/`AuthSessionRepository`
+ports; `persistence` implements them (`app_user` — `user` is reserved in Postgres — and
+`auth_session`); `packages/auth`'s `AuthService` holds the logic:
+- Passwords: scrypt (Node built-in, N=2^15, r=8, p=1, parameters stored in each hash so
+  they can be raised later), NFKC-normalized, constant-time compare. Unknown usernames are
+  verified against a dummy hash so login timing doesn't reveal which accounts exist.
+- Sessions: 256-bit random bearer tokens; only their SHA-256 is stored, so a leaked
+  session table isn't usable. No expiry — a session lasts until logout (deleting the row).
+  `lastSeenAt` is rewritten at most every 5 minutes.
+- Usernames are unique case-insensitively (a `lower(username)` unique index); passwords
+  need 8+ characters.
+- First-run setup (`POST /api/auth/setup`) creates the first account (an admin) and only
+  works while there are no users — enforced atomically with a transaction-scoped advisory
+  lock, so concurrent setup requests can't both win (covered by a Postgres-backed test).
+
+`apps/server` locks down **every** `/api` route by default with an `onRequest` hook
+(deny-by-default, matched case-insensitively since routing is), except `GET
+/api/auth/session` (needs-setup + current user, what the UI routes on), `POST
+/api/auth/setup`, `/login`, `/logout`. The browser gets the token as an HttpOnly,
+SameSite=Lax cookie (`Secure` only over HTTPS — the LAN setup is plain HTTP); other
+clients send `Authorization: Bearer <token>` (the login/setup responses also return it).
+Non-`/api` routes (`/health`, Jellyfin discovery, the UI itself) stay public. The UI's
+root layout load sends people to `/setup`, `/login`, or the app based on
+`/api/auth/session`. Not yet: roles beyond the single admin flag (every user can do
+everything), user management UI, login rate limiting.
+
 ### Jobs (done — metadata refresh; more job types come with acquisition)
 
 `packages/jobs`' `JobRunner` takes a `JobRepository` port (implemented by
@@ -468,22 +502,28 @@ pnpm turbo run build test
 # Lint — MUST run from the repo root, not per-package (see note below)
 pnpm lint
 
+# Every /api call needs a session. Log in once and reuse the token (first-run setup is the
+# UI's /setup page, or POST /api/auth/setup with the same body):
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"<user>","password":"<password>"}' | jq -r .token)
+AUTH="Authorization: Bearer $TOKEN"   # pass as -H "$AUTH" on the curls below
+
 # Trigger a manual library import
-curl -X POST http://localhost:8080/api/library/import \
+curl -X POST http://localhost:8080/api/library/import -H "$AUTH" \
   -H 'Content-Type: application/json' \
   -d '{"moviesPath":"/path/to/movies","showsPath":"/path/to/shows"}'
 
 # Identify a movie/series against TMDB
-curl http://localhost:8080/api/library/<id>/metadata/candidates
-curl -X POST http://localhost:8080/api/library/<id>/metadata/identify \
+curl http://localhost:8080/api/library/<id>/metadata/candidates -H "$AUTH"
+curl -X POST http://localhost:8080/api/library/<id>/metadata/identify -H "$AUTH" \
   -H 'Content-Type: application/json' -d '{"externalId":"<tmdb id>"}'
 
 # Auto-identify every un-identified item in the library at once
-curl -X POST http://localhost:8080/api/library/auto-identify
+curl -X POST http://localhost:8080/api/library/auto-identify -H "$AUTH"
 
 # Find/merge root series nodes that share an external id (auto-merges unambiguous ones)
-curl -X POST http://localhost:8080/api/library/merge-duplicates
-curl -X POST http://localhost:8080/api/library/merge-duplicates/confirm \
+curl -X POST http://localhost:8080/api/library/merge-duplicates -H "$AUTH"
+curl -X POST http://localhost:8080/api/library/merge-duplicates/confirm -H "$AUTH" \
   -H 'Content-Type: application/json' -d '{"primaryNodeId":"<id>","duplicateNodeId":"<id>"}'
 
 # Wipe library data for a clean re-import (dev only — does not touch scheduled_job)
@@ -500,10 +540,13 @@ docker exec docker-postgres-1 psql -U tessatv -d tessatv -c \
 `--env-file` flag — Turborepo does **not** forward the shell's exported env vars through
 its task graph, so relying on `source .env` alone silently breaks under `turbo watch`.
 
-`packages/persistence`'s `library-repository.test.ts` needs a running Postgres (the same
+`packages/persistence`'s `library-repository.test.ts` and `user-repository.test.ts` need a
+running Postgres (the same
 one `db:migrate` targets) — unlike every other test in the repo, which is pure-function
 only. Run `docker compose -f docker/docker-compose.yml up -d postgres` first if `pnpm
-turbo run test` fails only on that one file.
+turbo run test` fails only on those files. (`user-repository.test.ts`'s concurrent
+first-user test skips itself when the dev database already has accounts, rather than
+deleting them.)
 
 ### Non-obvious implementation notes
 
@@ -524,6 +567,12 @@ turbo run test` fails only on that one file.
   same-origin `fetch("/api/...")` fail over plain-HTTP LAN; the server now always sets
   `x-tessatv-forwarded-proto` from Fastify's own view of the connection (so clients can't
   spoof it) and points adapter-node's `PROTOCOL_HEADER` at it.
+- To test first-run setup end-to-end without consuming the real dev database's one-time
+  setup, run a second server against a throwaway database: `CREATE DATABASE tessatv_e2e`,
+  `db:migrate` with `DATABASE_URL` pointed at it, `PORT=8081 node apps/server/dist/index.js`,
+  then drop it. Headless Chromium works from `nix build nixpkgs#chromium` + `playwright-core`
+  — but run it with `env -u LD_LIBRARY_PATH`: the dev shell's library path leaks an older
+  glibc and Chromium fails to start otherwise.
 - `tsx --watch` runs as a supervisor process that respawns a child worker on file
   changes — `ps aux` shows two node processes for the server (the outer one keeps
   `--watch` in its args, the respawned child doesn't). If something goes wrong and the

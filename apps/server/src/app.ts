@@ -1,7 +1,9 @@
+import type { AuthService } from "@tessatv/auth";
 import type { LibraryRepository } from "@tessatv/domain";
 import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
 import type { MetadataProvidersByKind } from "@tessatv/library";
 import Fastify, { type FastifyInstance } from "fastify";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerLibraryImportRoutes } from "./routes/library-import.js";
 import { registerLibraryMergeRoutes } from "./routes/library-merge.js";
 import { registerLibraryMetadataRoutes } from "./routes/library-metadata.js";
@@ -13,6 +15,9 @@ export interface AppDependencies {
   /** Default provider per media kind — e.g. `{ movie: tmdb, series: tvdb }`. A kind with
    * no entry means that kind's metadata routes return 503 until it's configured. */
   metadataProviders: MetadataProvidersByKind;
+  /** Enables login and locks down every `/api` route behind it. Omitted only in tests of
+   * individual routes that don't involve auth. */
+  auth?: AuthService;
   /** Mounts the Jellyfin-compatible API at the root. Omitted only in tests that don't need it. */
   jellyfin?: JellyfinCompatOptions;
   /** SvelteKit's built handler, served at the root for any path no explicit route claims. Omitted when the web app isn't built. */
@@ -26,6 +31,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
 
   app.get("/health", async () => ({ status: "ok" }));
 
+  if (deps.auth) registerAuthRoutes(app, deps.auth);
   registerLibraryRoutes(app, deps.libraryRepository);
   registerLibraryImportRoutes(app, deps.libraryRepository, deps.metadataProviders);
   registerLibraryMetadataRoutes(app, deps.libraryRepository, deps.metadataProviders);

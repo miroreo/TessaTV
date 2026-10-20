@@ -11,6 +11,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@tessatv/auth": "workspace:*",
     "@tessatv/config": "workspace:*",
     "@tessatv/domain": "workspace:*",
     "@tessatv/jellyfin-compat": "workspace:*",
