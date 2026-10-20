@@ -1,0 +1,38 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8096:8096"
+    env_file:
+      - ../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - media-library:/data/library
+      - app-cache:/data/cache
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: tessatv
+      POSTGRES_PASSWORD: tessatv
+      POSTGRES_DB: tessatv
+    ports:
+      # Exposed to the host so `apps/server` can run natively during local dev and still
+      # reach this container; the app container itself talks to it as `postgres:5432`.
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tessatv"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  media-library:
+  app-cache:

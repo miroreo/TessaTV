@@ -1,0 +1,24 @@
+{
+  "name": "@tessatv/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "dev": "node --env-file=../../.env --import tsx/esm --watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@tessatv/config": "workspace:*",
+    "@tessatv/domain": "workspace:*",
+    "@tessatv/library": "workspace:*",
+    "@tessatv/metadata": "workspace:*",
+    "@tessatv/persistence": "workspace:*",
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}
