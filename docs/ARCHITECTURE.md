@@ -35,7 +35,22 @@ Repo: https://github.com/miroreo/TessaTV (private).
   auto-merged), then confirmed explicitly: one node survives with both seasons' full
   episode counts intact, and re-running the sweep afterward finds nothing left to merge.
   This also caught a second real bug — see "Non-obvious implementation notes".
-- ⬜ **M3 — Streaming + Jellyfin-compat phases 1–2.** Not started.
+- ⬜ **M3 — Streaming + Jellyfin-compat phases 1–2.** Not started yet, but scoped.
+  Sequencing decided: build `streaming` first (self-contained, verifiable with real
+  ffmpeg/ffprobe against real library files, no client needed), *then*
+  `jellyfin-compat` on top of a working playback engine. Live client testing is the plan
+  for the compat phase: the dev server's `PORT` was moved to **8080** (still binds
+  `0.0.0.0`) specifically so the official Jellyfin iOS app can connect to this machine
+  over LAN (`http://10.8.128.8:8080`) or Tailscale (`http://100.97.251.108:8080`) as each
+  phase lands — update these addresses if they've changed. `apps/web`'s Vite proxy was
+  updated to match (`/api` → `localhost:8080`). This machine has a real AMD iGPU with
+  VAAPI support (`/dev/dri/renderD128` present, confirmed via `ffmpeg -hwaccels` and
+  `lspci`) — plan is to scope the `HardwareAccel` strategy to `none`/`vaapi` for now
+  (actually verifiable here) rather than guess at NVENC/QSV blind, structured so those
+  slot in later without changing the abstraction. Nothing has been built yet — a prior
+  attempt at scaffolding `packages/streaming` in this session was reverted (package.json
+  + tsconfig.json only, no source files, would have broken `tsc -b`) rather than leaving
+  a non-building package committed; start that package fresh next session.
 - ⬜ **M4 — Acquisition pipeline, first protocol.** Not started.
 - ⬜ **M5 — Second protocol adapter.** Not started.
 - ⬜ **M6 — Deeper Jellyfin-compat coverage.** Not started.
@@ -393,7 +408,7 @@ pnpm --filter @tessatv/persistence db:migrate
 
 # Hot-reload dev loop for the server + web app (rebuilds/restarts on any dependency change)
 pnpm exec turbo watch dev --filter=@tessatv/server --filter=@tessatv/web
-# server: http://localhost:8096   web: http://localhost:5173 (proxies /api to the server)
+# server: http://localhost:8080   web: http://localhost:5173 (proxies /api to the server)
 
 # Build + test everything
 pnpm turbo run build test
@@ -402,21 +417,21 @@ pnpm turbo run build test
 pnpm lint
 
 # Trigger a manual library import
-curl -X POST http://localhost:8096/api/library/import \
+curl -X POST http://localhost:8080/api/library/import \
   -H 'Content-Type: application/json' \
   -d '{"moviesPath":"/path/to/movies","showsPath":"/path/to/shows"}'
 
 # Identify a movie/series against TMDB
-curl http://localhost:8096/api/library/<id>/metadata/candidates
-curl -X POST http://localhost:8096/api/library/<id>/metadata/identify \
+curl http://localhost:8080/api/library/<id>/metadata/candidates
+curl -X POST http://localhost:8080/api/library/<id>/metadata/identify \
   -H 'Content-Type: application/json' -d '{"externalId":"<tmdb id>"}'
 
 # Auto-identify every un-identified item in the library at once
-curl -X POST http://localhost:8096/api/library/auto-identify
+curl -X POST http://localhost:8080/api/library/auto-identify
 
 # Find/merge root series nodes that share an external id (auto-merges unambiguous ones)
-curl -X POST http://localhost:8096/api/library/merge-duplicates
-curl -X POST http://localhost:8096/api/library/merge-duplicates/confirm \
+curl -X POST http://localhost:8080/api/library/merge-duplicates
+curl -X POST http://localhost:8080/api/library/merge-duplicates/confirm \
   -H 'Content-Type: application/json' -d '{"primaryNodeId":"<id>","duplicateNodeId":"<id>"}'
 
 # Wipe library data for a clean re-import (dev only — does not touch scheduled_job)
