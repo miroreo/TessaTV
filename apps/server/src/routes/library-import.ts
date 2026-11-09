@@ -11,23 +11,21 @@ import {
   type MetadataProvidersByKind,
 } from "@tessatv/library";
 import type { FastifyInstance } from "fastify";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
+import { z } from "zod";
 
-interface ImportRequestBody {
-  moviesPath?: string;
-  showsPath?: string;
-}
+const importBody = z
+  .object({ moviesPath: z.string().min(1).optional(), showsPath: z.string().min(1).optional() })
+  .refine((body) => body.moviesPath || body.showsPath, "provide at least one of moviesPath or showsPath");
 
 export function registerLibraryImportRoutes(
-  app: FastifyInstance,
+  server: FastifyInstance,
   libraryRepository: LibraryRepository,
   metadataProviders: MetadataProvidersByKind,
 ): void {
-  app.post<{ Body: ImportRequestBody }>("/api/library/import", async (request, reply) => {
-    const { moviesPath, showsPath } = request.body ?? {};
-    if (!moviesPath && !showsPath) {
-      reply.code(400);
-      return { error: "provide at least one of moviesPath or showsPath" };
-    }
+  const app = server.withTypeProvider<ZodTypeProvider>();
+  app.post("/api/library/import", { schema: { body: importBody } }, async (request) => {
+    const { moviesPath, showsPath } = request.body;
 
     const result: {
       movies?: { created: number; skipped: number; skippedFolders: { path: string; reason: string }[] };

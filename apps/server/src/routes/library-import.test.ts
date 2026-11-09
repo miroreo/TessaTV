@@ -69,6 +69,16 @@ afterEach(async () => {
 });
 
 describe("POST /api/library/import", () => {
+  it("rejects a body with neither path, or a path of the wrong type, with invalid_request", async () => {
+    const app = buildApp({ libraryRepository: new InMemoryLibraryRepository(), metadataProviders: {} });
+
+    for (const payload of [{}, { moviesPath: 42 }]) {
+      const response = await app.inject({ method: "POST", url: "/api/library/import", payload });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("invalid_request");
+    }
+  });
+
   it("does not attempt identification when no metadata provider is configured", async () => {
     const app = buildApp({ libraryRepository: new InMemoryLibraryRepository(), metadataProviders: {} });
 

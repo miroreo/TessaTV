@@ -2,6 +2,11 @@ import type { LibraryRepository, MediaTypeId } from "@tessatv/domain";
 import { autoIdentifyLibrary, type MetadataProvidersByKind } from "@tessatv/library";
 import { type MetadataMediaKind, type MetadataProvider, toMetadataMediaKind } from "@tessatv/metadata";
 import type { FastifyInstance } from "fastify";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
+import { z } from "zod";
+
+const idParams = z.object({ id: z.string() });
+const providerField = z.string().min(1).optional();
 
 /**
  * `toMetadataMediaKind` alone isn't enough here: "series" is also used for season
@@ -32,12 +37,19 @@ const DISABLED_RESPONSE = {
 };
 
 export function registerLibraryMetadataRoutes(
-  app: FastifyInstance,
+  server: FastifyInstance,
   libraryRepository: LibraryRepository,
   metadataProviders: MetadataProvidersByKind,
 ): void {
-  app.get<{ Params: { id: string }; Querystring: { year?: string; provider?: string } }>(
+  const app = server.withTypeProvider<ZodTypeProvider>();
+  app.get(
     "/api/library/:id/metadata/candidates",
+    {
+      schema: {
+        params: idParams,
+        querystring: z.object({ year: z.coerce.number().int().optional(), provider: providerField }),
+      },
+    },
     async (request, reply) => {
       const node = await libraryRepository.getNode(request.params.id);
       if (!node) {
@@ -55,14 +67,15 @@ export function registerLibraryMetadataRoutes(
         return DISABLED_RESPONSE;
       }
 
-      const year = request.query.year ? Number(request.query.year) : null;
+      const year = request.query.year ?? null;
       const candidates = await provider.search({ title: node.title, year, mediaKind });
       return { provider: provider.id, items: candidates };
     },
   );
 
-  app.post<{ Params: { id: string }; Body: { externalId: string; provider?: string } }>(
+  app.post(
     "/api/library/:id/metadata/identify",
+    { schema: { params: idParams, body: z.object({ externalId: z.string().min(1), provider: providerField }) } },
     async (request, reply) => {
       const node = await libraryRepository.getNode(request.params.id);
       if (!node) {
@@ -104,8 +117,9 @@ export function registerLibraryMetadataRoutes(
     },
   );
 
-  app.get<{ Params: { id: string }; Querystring: { provider?: string } }>(
+  app.get(
     "/api/library/:id/metadata",
+    { schema: { params: idParams, querystring: z.object({ provider: providerField }) } },
     async (request, reply) => {
       const node = await libraryRepository.getNode(request.params.id);
       if (!node) {

@@ -1,6 +1,8 @@
 import { AuthError, type AuthErrorCode, type AuthService } from "@tessatv/auth";
 import type { LoginResponse, PublicUser, SessionResponse } from "@tessatv/domain";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
+import { z } from "zod";
 import { clearSessionCookie, readSessionToken, setSessionCookie } from "../session-token.js";
 
 declare module "fastify" {
@@ -20,18 +22,10 @@ const ERROR_STATUS: Record<AuthErrorCode, number> = {
   invalid_credentials: 401,
 };
 
-interface Credentials {
-  username?: unknown;
-  password?: unknown;
-}
+const credentialsSchema = { body: z.object({ username: z.string(), password: z.string() }) };
 
 function clientName(request: FastifyRequest): string | null {
   return request.headers["user-agent"]?.slice(0, 200) ?? null;
-}
-
-function credentials(body: Credentials | undefined): { username: string; password: string } | null {
-  if (typeof body?.username !== "string" || typeof body.password !== "string") return null;
-  return { username: body.username, password: body.password };
 }
 
 async function sendAuthError(reply: FastifyReply, error: unknown) {
@@ -39,7 +33,9 @@ async function sendAuthError(reply: FastifyReply, error: unknown) {
   return reply.code(ERROR_STATUS[error.code]).send({ error: error.code, message: error.message });
 }
 
-export function registerAuthRoutes(app: FastifyInstance, auth: AuthService): void {
+export function registerAuthRoutes(server: FastifyInstance, auth: AuthService): void {
+  const app = server.withTypeProvider<ZodTypeProvider>();
+
   // Locks down every /api route except the public ones above. Route-level config would be
   // easy to forget on a new route; deny-by-default can't be.
   app.addHook("onRequest", async (request, reply) => {
@@ -58,11 +54,10 @@ export function registerAuthRoutes(app: FastifyInstance, auth: AuthService): voi
     return { needsSetup: await auth.needsSetup(), user: authenticated?.user ?? null };
   });
 
-  app.post<{ Body: Credentials }>("/api/auth/setup", async (request, reply) => {
-    const input = credentials(request.body);
-    if (!input) return reply.code(400).send({ error: "invalid_request" });
+  app.post("/api/auth/setup", { schema: credentialsSchema }, async (request, reply) => {
     try {
-      const result = await auth.completeSetup(input.username, input.password, clientName(request));
+      const { username, password } = request.body;
+      const result = await auth.completeSetup(username, password, clientName(request));
       setSessionCookie(request, reply, result.token);
       return { user: result.user, token: result.token } satisfies LoginResponse;
     } catch (error) {
@@ -70,11 +65,10 @@ export function registerAuthRoutes(app: FastifyInstance, auth: AuthService): voi
     }
   });
 
-  app.post<{ Body: Credentials }>("/api/auth/login", async (request, reply) => {
-    const input = credentials(request.body);
-    if (!input) return reply.code(400).send({ error: "invalid_request" });
+  app.post("/api/auth/login", { schema: credentialsSchema }, async (request, reply) => {
     try {
-      const result = await auth.login(input.username, input.password, clientName(request));
+      const { username, password } = request.body;
+      const result = await auth.login(username, password, clientName(request));
       setSessionCookie(request, reply, result.token);
       return { user: result.user, token: result.token } satisfies LoginResponse;
     } catch (error) {
