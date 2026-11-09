@@ -1,3 +1,6 @@
+import ky, { type KyInstance } from "ky";
+import { nullOn404, type QueryParams } from "./http.js";
+
 const DEFAULT_BASE_URL = "https://api.themoviedb.org/3";
 const DEFAULT_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500";
 
@@ -12,42 +15,28 @@ export interface TmdbClientOptions {
  * wire format; everything above this talks in the generic MetadataProvider shapes. */
 export class TmdbClient {
   private readonly apiKey: string;
-  private readonly baseUrl: string;
   private readonly imageBaseUrl: string;
-  private readonly fetchImpl: typeof fetch;
+  private readonly http: KyInstance;
 
   constructor(options: TmdbClientOptions) {
     this.apiKey = options.apiKey;
-    this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     this.imageBaseUrl = options.imageBaseUrl ?? DEFAULT_IMAGE_BASE_URL;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.http = ky.create({
+      prefix: options.baseUrl ?? DEFAULT_BASE_URL,
+      ...(options.fetchImpl ? { fetch: options.fetchImpl } : {}),
+    });
   }
 
   imageUrl(path: string | null | undefined): string | null {
     return path ? `${this.imageBaseUrl}${path}` : null;
   }
 
-  async get<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
-    const url = new URL(`${this.baseUrl}${path}`);
-    url.searchParams.set("api_key", this.apiKey);
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
-    }
-
-    const response = await this.fetchImpl(url);
-    if (!response.ok) {
-      throw new Error(`TMDB request failed: ${response.status} ${response.statusText} (${url.pathname})`);
-    }
-    return (await response.json()) as T;
+  get<T>(path: string, params: QueryParams = {}): Promise<T> {
+    return this.http.get(path, { searchParams: { ...params, api_key: this.apiKey } }).json<T>();
   }
 
   /** Like `get`, but a 404 (unknown id) returns null instead of throwing. */
-  async getOrNull<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T | null> {
-    try {
-      return await this.get<T>(path, params);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("404")) return null;
-      throw error;
-    }
+  getOrNull<T>(path: string, params: QueryParams = {}): Promise<T | null> {
+    return nullOn404(this.get<T>(path, params));
   }
 }

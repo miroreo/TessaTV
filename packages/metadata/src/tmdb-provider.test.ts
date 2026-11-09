@@ -3,12 +3,12 @@ import { TmdbClient } from "./tmdb-client.js";
 import { TmdbMetadataProvider } from "./tmdb-provider.js";
 
 function fakeResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 404 ? "Not Found" : "OK",
-    json: async () => body,
-  } as Response;
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+/** The URL of the nth request the client made. */
+function requestedUrl(fetchImpl: { mock: { calls: unknown[][] } }, call: number): URL {
+  return new URL((fetchImpl.mock.calls[call]![0] as Request).url);
 }
 
 describe("TmdbMetadataProvider", () => {
@@ -33,10 +33,11 @@ describe("TmdbMetadataProvider", () => {
         posterUrl: "https://image.tmdb.org/t/p/w500/matrix.jpg",
       },
     ]);
-    const requestedUrl = fetchImpl.mock.calls[0]![0] as URL;
-    expect(requestedUrl.pathname).toBe("/3/search/movie");
-    expect(requestedUrl.searchParams.get("query")).toBe("The Matrix");
-    expect(requestedUrl.searchParams.get("year")).toBe("1999");
+    const url = requestedUrl(fetchImpl, 0);
+    expect(url.pathname).toBe("/3/search/movie");
+    expect(url.searchParams.get("query")).toBe("The Matrix");
+    expect(url.searchParams.get("year")).toBe("1999");
+    expect(url.searchParams.get("api_key")).toBe("key");
   });
 
   it("maps a TV search response, using first_air_date_year instead of year", async () => {
@@ -52,9 +53,9 @@ describe("TmdbMetadataProvider", () => {
     expect(candidates).toEqual([
       { externalId: "1396", title: "Breaking Bad", year: 2008, overview: null, posterUrl: null },
     ]);
-    const requestedUrl = fetchImpl.mock.calls[0]![0] as URL;
-    expect(requestedUrl.pathname).toBe("/3/search/tv");
-    expect(requestedUrl.searchParams.get("first_air_date_year")).toBe("2008");
+    const url = requestedUrl(fetchImpl, 0);
+    expect(url.pathname).toBe("/3/search/tv");
+    expect(url.searchParams.get("first_air_date_year")).toBe("2008");
   });
 
   it("fetchDetails returns null for an unknown id (404) instead of throwing", async () => {
