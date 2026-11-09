@@ -28,54 +28,33 @@
   }
 </script>
 
-<form onsubmit={handleSubmit}>
-  <label>
-    Username
-    <input bind:value={username} autocomplete="username" autocapitalize="none" required />
+<form onsubmit={handleSubmit} class="fieldset w-full max-w-xs gap-3">
+  <label class="floating-label">
+    <span>Username</span>
+    <input class="input w-full" placeholder="Username" bind:value={username} autocomplete="username" autocapitalize="none" required />
   </label>
-  <label>
-    Password
+  <label class="floating-label">
+    <span>Password</span>
     <input
+      class="input w-full"
       type="password"
+      placeholder="Password"
       bind:value={password}
       autocomplete={confirmPassword ? "new-password" : "current-password"}
       required
     />
   </label>
   {#if confirmPassword}
-    <label>
-      Confirm password
-      <input type="password" bind:value={confirmation} autocomplete="new-password" required />
+    <label class="floating-label">
+      <span>Confirm password</span>
+      <input class="input w-full" type="password" placeholder="Confirm password" bind:value={confirmation} autocomplete="new-password" required />
     </label>
   {/if}
   {#if error}
-    <p class="error" role="alert">{error}</p>
+    <div class="alert alert-error alert-soft" role="alert">{error}</div>
   {/if}
-  <button type="submit" disabled={submitting}>{submitLabel}</button>
+  <button type="submit" class="btn btn-primary" disabled={submitting}>
+    {#if submitting}<span class="loading loading-spinner loading-sm"></span>{/if}
+    {submitLabel}
+  </button>
 </form>
-
-<style>
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    max-width: 20rem;
-  }
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  input {
-    font-size: 1rem;
-    padding: 0.5rem;
-  }
-  button {
-    font-size: 1rem;
-    padding: 0.5rem;
-  }
-  .error {
-    color: #f77;
-    margin: 0;
-  }
-</style>
