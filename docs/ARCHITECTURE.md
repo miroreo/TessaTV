@@ -133,8 +133,8 @@ The explicit goals driving every structural choice below:
   repository functions — fits the interface-driven module boundaries better than Prisma's
   generated client).
 - Job scheduling (indexer polling, download monitoring, library scans, metadata refresh):
-  **Postgres-backed polling** (a jobs table + advisory locks) — no Redis/BullMQ, since job
-  volume here is low-throughput and latency-tolerant, and this avoids a third container.
+  **pg-boss** (Postgres-backed queue and cron, in its own `pgboss` schema) — no Redis/BullMQ,
+  since job volume here is low-throughput and latency-tolerant, and this avoids a third container.
 - Process model: **one Node process, one HTTP listener** serving both the Jellyfin-compat
   API and the SvelteKit UI (SvelteKit's Node adapter mounted alongside the API routes).
 - Monorepo tooling: **pnpm workspaces** (chosen specifically for its non-flat,
@@ -188,8 +188,8 @@ tessatv/
     jellyfin-compat/       # Jellyfin REST+WS wire-format translation layer only — zero
                           # business logic, talks to domain/streaming/library via their
                           # public interfaces
-    jobs/                  # generic JobDefinition/JobRunner abstraction, Postgres-backed
-                          # polling implementation (done — one job registered so far)
+    jobs/                  # JobDefinition/JobScheduler, a thin wrapper over pg-boss
+                          # (done — one job registered so far)
     config/                 # typed config loading/validation (zod), secrets handling
     shared/                  # cross-cutting utils/logging/error types — kept deliberately
                           # small to avoid becoming a dumping ground
@@ -440,17 +440,15 @@ everything), user management UI, login rate limiting.
 
 ### Jobs (done — metadata refresh; more job types come with acquisition)
 
-`packages/jobs`' `JobRunner` takes a `JobRepository` port (implemented by
-`DrizzleJobRepository` against a `scheduled_job` table — `next_run_at`/`last_run_at`/
-`last_error` per named job) and any number of registered `JobDefinition`s (`name`,
-`intervalMs`, `handler`). `next_run_at` persists across restarts instead of resetting to
-"run now" every boot. One job failing is recorded in `last_error` and does not block any
-other due job in the same tick — the same per-item isolation lesson the auto-identify
-sweep already needed, applied proactively here from the start. `apps/server` registers one
-job today, `metadata-refresh` (daily, matching `CachedMetadataProvider`'s TTL), running
-`refreshLibraryMetadata` from `packages/library`. Indexer polling and download-status
-monitoring will register their own `JobDefinition`s the same way once `acquisition` exists
-— no changes needed to `JobRunner` itself.
+`packages/jobs`' `JobScheduler` wraps pg-boss: each registered `JobDefinition` (`name`,
+`cron`, `handler`) gets a `singleton` queue (so two server processes never run the same job
+at once), a cron schedule, and a worker. Schedules live in pg-boss's own `pgboss` schema and
+survive restarts; a run missed while the server was down happens once on the next start
+(`missed: "once"`). A handler that throws is recorded and retried by pg-boss without
+affecting other jobs. `apps/server` registers one job today, `metadata-refresh` (daily at
+04:00 UTC, matching `CachedMetadataProvider`'s TTL), running `refreshLibraryMetadata` from
+`packages/library`. Indexer polling and download-status monitoring will register their own
+`JobDefinition`s the same way once `acquisition` exists.
 
 ## Roadmap
 
@@ -547,13 +545,14 @@ curl -X POST http://localhost:8080/api/library/merge-duplicates -H "$AUTH"
 curl -X POST http://localhost:8080/api/library/merge-duplicates/confirm -H "$AUTH" \
   -H 'Content-Type: application/json' -d '{"primaryNodeId":"<id>","duplicateNodeId":"<id>"}'
 
-# Wipe library data for a clean re-import (dev only — does not touch scheduled_job)
+# Wipe library data for a clean re-import (dev only — does not touch the pgboss schema)
 docker exec docker-postgres-1 psql -U tessatv -d tessatv -c \
   "TRUNCATE TABLE media_file, unit, library_node, external_id, metadata_cache RESTART IDENTITY CASCADE;"
 
-# Force a registered job to run on its next ~60s poll tick instead of waiting for its schedule
-docker exec docker-postgres-1 psql -U tessatv -d tessatv -c \
-  "UPDATE scheduled_job SET next_run_at = now() WHERE name = 'metadata-refresh';"
+# Run a registered job now instead of waiting for its schedule (from packages/jobs)
+node --env-file=../../.env -e "const { PgBoss } = await import('pg-boss'); \
+  const b = new PgBoss(process.env.DATABASE_URL); await b.start(); \
+  await b.send('metadata-refresh'); await b.stop();" --input-type=module
 ```
 
 `.env` (git-ignored) needs `DATABASE_URL`, `APP_SECRET` (32+ chars), and optionally
