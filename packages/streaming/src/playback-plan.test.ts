@@ -12,6 +12,7 @@ describe("resolvePlaybackPlan", () => {
     expect(resolvePlaybackPlan(mediaProbe(), iosLikeCapabilities())).toEqual({
       mode: "direct-play",
       path: "/media/file.mp4",
+      subtitle: null,
       reasons: [],
     });
   });
@@ -129,6 +130,58 @@ describe("resolvePlaybackPlan", () => {
     expect(() => resolvePlaybackPlan(mediaProbe({ videoStreams: [], audioStreams: [] }), iosLikeCapabilities())).toThrow(
       /no playable/,
     );
+  });
+
+  it("counts copied audio with no reported bitrate against the budget", () => {
+    const probe = mediaProbe({
+      bitRate: 12_000_000,
+      audioStreams: [audioStream({ codec: "ac3", channels: 6, bitRate: null })],
+    });
+    const plan = hlsPlan(resolvePlaybackPlan(probe, iosLikeCapabilities({ maxBitrate: 4_000_000 })));
+    expect(plan.audio?.kind).toBe("copy");
+    expect(plan.video).toMatchObject({ kind: "transcode", bitrate: 4_000_000 - 384_000 });
+  });
+
+  it("drops below the usual minimum video bitrate rather than exceed a very low cap", () => {
+    const probe = mediaProbe({ bitRate: 2_000_000 });
+    const plan = hlsPlan(resolvePlaybackPlan(probe, iosLikeCapabilities({ maxBitrate: 400_000 })));
+    expect(plan.video).toMatchObject({ kind: "transcode", bitrate: 400_000 - 192_000 });
+  });
+
+  it("transcodes HDR for a client that hasn't declared HDR support", () => {
+    const probe = mediaProbe({ videoStreams: [videoStream({ codec: "hevc", bitDepth: 10, isHdr: true })] });
+    const plan = hlsPlan(resolvePlaybackPlan(probe, iosLikeCapabilities()));
+    expect(plan.reasons).toEqual(["VideoRangeNotSupported"]);
+    expect(plan.video?.kind).toBe("transcode");
+    expect(resolvePlaybackPlan(probe, iosLikeCapabilities({ supportsHdr: true })).mode).toBe("direct-play");
+  });
+
+  describe("subtitles", () => {
+    const text = { index: 3, codec: "subrip", language: "eng", title: null, isDefault: false, isForced: false, isTextBased: true };
+    const image = { ...text, index: 4, codec: "hdmv_pgs_subtitle", isTextBased: false };
+    const probe = mediaProbe({ subtitleStreams: [text, image] });
+
+    it("are off unless requested, even if the file has them", () => {
+      expect(resolvePlaybackPlan(probe, iosLikeCapabilities())).toMatchObject({ mode: "direct-play", subtitle: null });
+    });
+
+    it("keeps direct play for text subtitles, delivered as a WebVTT sidecar", () => {
+      expect(resolvePlaybackPlan(probe, iosLikeCapabilities(), { subtitleStreamIndex: 3 })).toMatchObject({
+        mode: "direct-play",
+        subtitle: { kind: "sidecar", streamIndex: 3, format: "webvtt" },
+      });
+    });
+
+    it("forces a transcode to burn in image subtitles", () => {
+      const plan = hlsPlan(resolvePlaybackPlan(probe, iosLikeCapabilities(), { subtitleStreamIndex: 4 }));
+      expect(plan.mode).toBe("transcode");
+      expect(plan.reasons).toEqual(["SubtitleBurnInRequired"]);
+      expect(plan.subtitle).toEqual({ kind: "burn-in", streamIndex: 4 });
+    });
+
+    it("rejects a stream that doesn't exist", () => {
+      expect(() => resolvePlaybackPlan(probe, iosLikeCapabilities(), { subtitleStreamIndex: 9 })).toThrow(/No stream/);
+    });
   });
 
   it("fails clearly when the client offers no usable transcode codec", () => {

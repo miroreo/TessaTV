@@ -1,5 +1,5 @@
 import type { TranscodeVideoCodec } from "../client-capabilities.js";
-import { rateControlArgs, type HardwareAccel, type VideoEncodeRequest, type VideoPipeline } from "./hardware-accel.js";
+import { rateControlArgs, SDR_COLOR_ARGS, toneMapFilters, type HardwareAccel, type VideoEncodeRequest, type VideoPipeline } from "./hardware-accel.js";
 
 const ENCODER_ARGS: Record<TranscodeVideoCodec, readonly string[]> = {
   h264: ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high"],
@@ -13,12 +13,17 @@ export class SoftwareAccel implements HardwareAccel {
 
   videoPipeline(request: VideoEncodeRequest): VideoPipeline {
     const { source, width, height } = request;
-    const filters = source.width !== width || source.height !== height ? [`scale=${width}:${height}`] : [];
+    const scale = source.width !== width || source.height !== height ? [`scale=${width}:${height}`] : [];
     return {
       inputArgs: [],
       // 8-bit 4:2:0 output: the widest-compatible choice, and it converts 10-bit sources.
-      filters: [...filters, "format=yuv420p"],
-      encoderArgs: [...ENCODER_ARGS[request.codec], ...rateControlArgs(request.bitrate)],
+      filters: source.isHdr ? toneMapFilters(width, height, "yuv420p") : [...scale, "format=yuv420p"],
+      postOverlayFilters: [],
+      encoderArgs: [
+        ...ENCODER_ARGS[request.codec],
+        ...rateControlArgs(request.bitrate),
+        ...(source.isHdr ? SDR_COLOR_ARGS : []),
+      ],
       decode: "software",
       encode: "software",
     };

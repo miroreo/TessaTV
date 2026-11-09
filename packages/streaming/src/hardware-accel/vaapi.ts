@@ -1,5 +1,5 @@
 import type { TranscodeVideoCodec } from "../client-capabilities.js";
-import { rateControlArgs, type HardwareAccel, type VideoEncodeRequest, type VideoPipeline } from "./hardware-accel.js";
+import { rateControlArgs, SDR_COLOR_ARGS, toneMapFilters, type HardwareAccel, type VideoEncodeRequest, type VideoPipeline } from "./hardware-accel.js";
 
 export interface VaapiDecodeSupport {
   readonly codec: string;
@@ -40,8 +40,8 @@ export class VaapiAccel implements HardwareAccel {
   videoPipeline(request: VideoEncodeRequest): VideoPipeline {
     if (!this.capabilities.encode.includes(request.codec)) return this.fallback.videoPipeline(request);
 
-    const hardwareDecode = this.canDecode(request.source.codec, request.source.bitDepth);
-    const scale = `scale_vaapi=w=${request.width}:h=${request.height}:format=nv12`;
+    const { source } = request;
+    const hardwareDecode = this.canDecode(source.codec, source.bitDepth);
     return {
       inputArgs: [
         "-init_hw_device",
@@ -50,10 +50,49 @@ export class VaapiAccel implements HardwareAccel {
         "va",
         ...(hardwareDecode ? ["-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "vaapi"] : []),
       ],
-      filters: hardwareDecode ? [scale] : ["format=nv12", "hwupload", scale],
-      encoderArgs: [...ENCODERS[request.codec], "-rc_mode", "VBR", ...rateControlArgs(request.bitrate)],
+      ...this.filterChains(request, hardwareDecode),
+      encoderArgs: [
+        ...ENCODERS[request.codec],
+        "-rc_mode",
+        "VBR",
+        ...rateControlArgs(request.bitrate),
+        ...(source.isHdr ? SDR_COLOR_ARGS : []),
+      ],
       decode: hardwareDecode ? "hardware" : "software",
       encode: "hardware",
+    };
+  }
+
+  /**
+   * Tone-mapping and subtitle overlay only run in software, so those frames visit system
+   * memory. They're still decoded and scaled on the GPU where possible: downloading frames
+   * that are already 1080p is what makes 4K HDR sources keep up with realtime.
+   */
+  private filterChains(
+    { source, width, height, burnIn }: VideoEncodeRequest,
+    hardwareDecode: boolean,
+  ): Pick<VideoPipeline, "filters" | "postOverlayFilters"> {
+    const gpuScale = (format: string) => `scale_vaapi=w=${width}:h=${height}:format=${format}`;
+    if (source.isHdr) {
+      return {
+        filters: [
+          ...(hardwareDecode ? [gpuScale("p010"), "hwdownload", "format=p010le"] : []),
+          ...toneMapFilters(width, height, "nv12"),
+        ],
+        postOverlayFilters: ["hwupload"],
+      };
+    }
+    if (burnIn) {
+      return {
+        filters: hardwareDecode
+          ? [gpuScale("nv12"), "hwdownload", "format=nv12"]
+          : [`scale=${width}:${height}`, "format=nv12"],
+        postOverlayFilters: ["format=nv12", "hwupload"],
+      };
+    }
+    return {
+      filters: hardwareDecode ? [gpuScale("nv12")] : ["format=nv12", "hwupload", gpuScale("nv12")],
+      postOverlayFilters: [],
     };
   }
 }

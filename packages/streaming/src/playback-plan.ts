@@ -4,7 +4,6 @@ import type {
   HlsSegmentContainer,
   TranscodeAudioCodec,
   TranscodeVideoCodec,
-  VideoCodecSupport,
 } from "./client-capabilities.js";
 import type { AudioStreamInfo, MediaProbe, VideoStreamInfo } from "./media-probe.js";
 
@@ -15,6 +14,8 @@ export type TranscodeReason =
   | "VideoProfileNotSupported"
   | "VideoResolutionNotSupported"
   | "VideoBitDepthNotSupported"
+  | "VideoRangeNotSupported"
+  | "SubtitleBurnInRequired"
   | "AudioCodecNotSupported"
   | "AudioChannelsNotSupported"
   | "ContainerBitrateExceedsLimit"
@@ -43,11 +44,21 @@ export type AudioAction =
       readonly bitrate: number;
     };
 
+/**
+ * `sidecar`: text subtitles delivered as a separate WebVTT file (see `extractWebVtt`), so
+ * they don't affect how the video is delivered. `burn-in`: image subtitles have no text to
+ * convert, so they get drawn onto the video — which forces a transcode.
+ */
+export type SubtitleAction =
+  | { readonly kind: "sidecar"; readonly streamIndex: number; readonly format: "webvtt" }
+  | { readonly kind: "burn-in"; readonly streamIndex: number };
+
 export type PlaybackPlan =
   | {
       /** Serve the file untouched; no ffmpeg involved. */
       readonly mode: "direct-play";
       readonly path: string;
+      readonly subtitle: Extract<SubtitleAction, { kind: "sidecar" }> | null;
       readonly reasons: readonly TranscodeReason[];
     }
   | {
@@ -57,6 +68,7 @@ export type PlaybackPlan =
       readonly segmentContainer: HlsSegmentContainer;
       readonly video: VideoAction | null;
       readonly audio: AudioAction | null;
+      readonly subtitle: SubtitleAction | null;
       /** Why direct play wasn't possible. */
       readonly reasons: readonly TranscodeReason[];
     };
@@ -66,6 +78,8 @@ export type HlsPlaybackPlan = Extract<PlaybackPlan, { mode: "remux" | "transcode
 export interface PlaybackOptions {
   /** Absolute ffprobe stream index; defaults to the default (else first) audio stream. */
   readonly audioStreamIndex?: number;
+  /** Absolute ffprobe stream index. Subtitles are only ever on when explicitly requested. */
+  readonly subtitleStreamIndex?: number;
   /** Forces an HLS transcode even when direct play would work (e.g. client-requested). */
   readonly forceTranscode?: boolean;
   readonly maxHeight?: number;
@@ -95,12 +109,13 @@ function pickPreferred<T extends { readonly index: number; readonly isDefault: b
 
 function videoIssues(
   stream: VideoStreamInfo,
-  support: readonly VideoCodecSupport[],
+  capabilities: ClientCapabilities,
   maxHeight: number | undefined,
 ): TranscodeReason[] {
-  const codecSupport = support.find((entry) => entry.codec === stream.codec);
+  const codecSupport = capabilities.videoCodecs.find((entry) => entry.codec === stream.codec);
   if (!codecSupport) return ["VideoCodecNotSupported"];
   const issues: TranscodeReason[] = [];
+  if (stream.isHdr && !capabilities.supportsHdr) issues.push("VideoRangeNotSupported");
   if (codecSupport.profiles && (!stream.profile || !codecSupport.profiles.includes(stream.profile))) {
     issues.push("VideoProfileNotSupported");
   }
@@ -137,6 +152,15 @@ function audioBitrateFor(channels: number): number {
   return channels > 2 ? 384_000 : 192_000;
 }
 
+const MIN_VIDEO_BITRATE = 500_000;
+const LOWEST_VIDEO_BITRATE = 100_000;
+
+/** Stays under the budget where possible; a budget too small to be watchable still gets a picture. */
+function videoBitrateFor(height: number, sourceBitrate: number, budget: number): number {
+  const floor = Math.max(LOWEST_VIDEO_BITRATE, Math.min(MIN_VIDEO_BITRATE, budget));
+  return Math.max(floor, Math.round(Math.min(defaultVideoBitrate(height), sourceBitrate, budget)));
+}
+
 /**
  * Decides how a file gets to a client: untouched, video copied into HLS, or re-encoded.
  * Pure and hardware-agnostic — which encoder actually runs is the `HardwareAccel`
@@ -151,7 +175,18 @@ export function resolvePlaybackPlan(
   const audio = pickPreferred(probe.audioStreams, options.audioStreamIndex);
   if (!video && !audio) throw new Error(`${probe.path} has no playable audio or video streams`);
 
-  const videoReasons = video ? videoIssues(video, capabilities.videoCodecs, options.maxHeight) : [];
+  const subtitleStream =
+    options.subtitleStreamIndex !== undefined ? pickPreferred(probe.subtitleStreams, options.subtitleStreamIndex) : null;
+  const burnIn = video !== null && subtitleStream !== null && !subtitleStream.isTextBased;
+  const subtitle: SubtitleAction | null = !subtitleStream
+    ? null
+    : subtitleStream.isTextBased
+      ? { kind: "sidecar", streamIndex: subtitleStream.index, format: "webvtt" }
+      : burnIn
+        ? { kind: "burn-in", streamIndex: subtitleStream.index }
+        : null;
+
+  const videoReasons = video ? videoIssues(video, capabilities, options.maxHeight) : [];
   const audioReasons = audio ? audioIssues(audio, capabilities.audioCodecs) : [];
   const overBitrate =
     capabilities.maxBitrate !== undefined && probe.bitRate !== null && probe.bitRate > capabilities.maxBitrate;
@@ -162,13 +197,16 @@ export function resolvePlaybackPlan(
     ...videoReasons,
     ...audioReasons,
     ...(overBitrate ? (["ContainerBitrateExceedsLimit"] as const) : []),
+    ...(burnIn ? (["SubtitleBurnInRequired"] as const) : []),
   ];
 
   if (reasons.length === 0 && !options.forceTranscode) {
-    return { mode: "direct-play", path: probe.path, reasons };
+    const sidecar = subtitle?.kind === "sidecar" ? subtitle : null;
+    return { mode: "direct-play", path: probe.path, subtitle: sidecar, reasons };
   }
 
-  const canCopyVideo = video !== null && videoReasons.length === 0 && !overBitrate && !options.forceTranscode;
+  const canCopyVideo =
+    video !== null && videoReasons.length === 0 && !overBitrate && !burnIn && !options.forceTranscode;
   const segmentContainer = chooseSegmentContainer(capabilities, canCopyVideo ? video : null);
   const copyVideo = canCopyVideo && segmentContainer.videoCopyOk;
   if (canCopyVideo && !copyVideo) reasons.push("VideoCodecNotSupportedInSegmentContainer");
@@ -199,15 +237,17 @@ export function resolvePlaybackPlan(
       codecSupport?.maxWidth ?? Infinity,
       Math.min(codecSupport?.maxHeight ?? Infinity, options.maxHeight ?? Infinity),
     );
-    const bitrateBudget =
-      capabilities.maxBitrate !== undefined
-        ? capabilities.maxBitrate - (audioAction?.kind === "transcode" ? audioAction.bitrate : (audio?.bitRate ?? 0))
-        : Infinity;
+    // Most Matroska files don't report per-stream bitrates, so a copied track's size has to
+    // be estimated; treating it as 0 would let the stream overshoot the client's limit.
+    const audioBitrate =
+      audioAction?.kind === "transcode"
+        ? audioAction.bitrate
+        : audio
+          ? (audio.bitRate ?? audioBitrateFor(audio.channels))
+          : 0;
+    const bitrateBudget = capabilities.maxBitrate !== undefined ? capabilities.maxBitrate - audioBitrate : Infinity;
     const sourceBitrate = video.bitRate ?? probe.bitRate ?? Infinity;
-    const bitrate = Math.max(
-      500_000,
-      Math.round(Math.min(defaultVideoBitrate(height), sourceBitrate, bitrateBudget)),
-    );
+    const bitrate = videoBitrateFor(height, sourceBitrate, bitrateBudget);
     videoAction = { kind: "transcode", streamIndex: video.index, source: video, codec, width, height, bitrate };
   }
 
@@ -217,6 +257,7 @@ export function resolvePlaybackPlan(
     segmentContainer: segmentContainer.container,
     video: videoAction,
     audio: audioAction,
+    subtitle,
     reasons,
   };
 }

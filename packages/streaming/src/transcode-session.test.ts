@@ -34,6 +34,7 @@ const PLAN: HlsPlaybackPlan = {
   segmentContainer: "mpegts",
   video: { kind: "copy", streamIndex: 0, codec: "h264" },
   audio: { kind: "copy", streamIndex: 1, codec: "aac" },
+  subtitle: null,
   reasons: ["ContainerNotSupported"],
 };
 
@@ -74,7 +75,7 @@ describe("TranscodeSession", () => {
   it("refuses direct-play plans", async () => {
     await expect(
       startTranscodeSession(
-        { mode: "direct-play", path: "/x.mp4", reasons: [] },
+        { mode: "direct-play", path: "/x.mp4", subtitle: null, reasons: [] },
         { accel: new SoftwareAccel(), directory: root, spawner },
       ),
     ).rejects.toThrow(/serve the file directly/);

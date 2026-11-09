@@ -7,4 +7,6 @@ export * from "./hardware-accel/vaapi.js";
 export * from "./media-probe.js";
 export * from "./playback-plan.js";
 export * from "./process.js";
+export * from "./subtitles.js";
+export * from "./transcode-manager.js";
 export * from "./transcode-session.js";

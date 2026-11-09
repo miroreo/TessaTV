@@ -33,6 +33,8 @@ export interface ClientCapabilities {
   readonly audioCodecs: readonly AudioCodecSupport[];
   /** Upper bound for the whole stream, in bits/second. */
   readonly maxBitrate?: number;
+  /** Whether the client can display PQ/HLG video. Unset means no: HDR gets tone-mapped to SDR. */
+  readonly supportsHdr?: boolean;
   readonly hls: {
     /** In order of preference. */
     readonly segmentContainers: readonly HlsSegmentContainer[];

@@ -19,6 +19,7 @@
     "@tessatv/library": "workspace:*",
     "@tessatv/metadata": "workspace:*",
     "@tessatv/persistence": "workspace:*",
+    "@tessatv/streaming": "workspace:*",
     "@tessatv/web": "workspace:*",
     "fastify": "^5.2.0"
   },

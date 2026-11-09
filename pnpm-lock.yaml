@@ -223,6 +223,9 @@ importers:
       '@tessatv/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@tessatv/streaming':
+        specifier: workspace:*
+        version: link:../../packages/streaming
       '@tessatv/web':
         specifier: workspace:*
         version: link:../web

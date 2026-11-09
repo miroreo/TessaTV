@@ -155,3 +155,41 @@ describe("selectHardwareAccel", () => {
     );
   });
 });
+
+describe("HDR tone-mapping", () => {
+  const hdrSource = videoStream({ codec: "hevc", bitDepth: 10, width: 3840, height: 2160, isHdr: true });
+  const hdr = { source: hdrSource, codec: "h264" as const, width: 1920, height: 1080, bitrate: 8_000_000 };
+
+  it("tone-maps in software and tags the output as BT.709", () => {
+    const pipeline = new SoftwareAccel().videoPipeline(hdr);
+    expect(pipeline.filters[0]).toBe("zscale=w=1920:h=1080:t=linear:npl=100");
+    expect(pipeline.filters).toContain("tonemap=tonemap=hable:desat=0");
+    expect(pipeline.filters.at(-1)).toBe("format=yuv420p");
+    expect(pipeline.encoderArgs).toEqual(expect.arrayContaining(["-color_trc", "bt709"]));
+  });
+
+  it("with VAAPI, scales on the GPU and uploads the tone-mapped frames back", () => {
+    const vaapi = new VaapiAccel(
+      { device: "/dev/dri/renderD128", encode: ["h264"], decode: [{ codec: "hevc", bitDepth: 10 }] },
+      new SoftwareAccel(),
+    );
+    const pipeline = vaapi.videoPipeline(hdr);
+    expect(pipeline.decode).toBe("hardware");
+    expect(pipeline.filters.slice(0, 3)).toEqual(["scale_vaapi=w=1920:h=1080:format=p010", "hwdownload", "format=p010le"]);
+    expect(pipeline.postOverlayFilters).toEqual(["hwupload"]);
+    expect(pipeline.encode).toBe("hardware");
+  });
+
+  it("with VAAPI but no hardware decode for the source, skips the GPU scale and download", () => {
+    const vaapi = new VaapiAccel({ device: "/dev/dri/renderD128", encode: ["h264"], decode: [] }, new SoftwareAccel());
+    const pipeline = vaapi.videoPipeline(hdr);
+    expect(pipeline.decode).toBe("software");
+    expect(pipeline.filters).not.toContain("hwdownload");
+  });
+
+  it("leaves SDR sources untouched", () => {
+    const pipeline = new SoftwareAccel().videoPipeline({ ...hdr, source: { ...hdrSource, isHdr: false } });
+    expect(pipeline.filters.join()).not.toContain("tonemap");
+    expect(pipeline.encoderArgs).not.toContain("-color_trc");
+  });
+});

@@ -10,7 +10,7 @@ const validEnv = {
 describe("loadConfig", () => {
   it("parses a valid environment", () => {
     const config = loadConfig(validEnv);
-    expect(config).toEqual({
+    expect(config).toMatchObject({
       DATABASE_URL: validEnv.DATABASE_URL,
       PORT: 8096,
       APP_SECRET: validEnv.APP_SECRET,
@@ -35,5 +35,11 @@ describe("loadConfig", () => {
     expect(loadConfig(validEnv).TVDB_API_KEY).toBeUndefined();
     expect(loadConfig({ ...validEnv, TMDB_API_KEY: "a-real-key" }).TMDB_API_KEY).toBe("a-real-key");
     expect(loadConfig({ ...validEnv, TVDB_API_KEY: "a-real-key" }).TVDB_API_KEY).toBe("a-real-key");
+  });
+
+  it("defaults transcoding settings, and rejects an unknown hardware accel mode", () => {
+    expect(loadConfig(validEnv)).toMatchObject({ HARDWARE_ACCEL: "auto", MAX_CONCURRENT_TRANSCODES: 3 });
+    expect(loadConfig(validEnv).TRANSCODE_DIR).toMatch(/tessatv-transcodes$/);
+    expect(() => loadConfig({ ...validEnv, HARDWARE_ACCEL: "nvenc" })).toThrow(/HARDWARE_ACCEL/);
   });
 });

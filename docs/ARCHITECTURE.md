@@ -45,7 +45,7 @@ Repo: https://github.com/miroreo/TessaTV (private).
   remux + software transcode + VAAPI transcode all succeed on a representative sample
   (HEVC 8/10-bit, AV1 10-bit + Opus, Hi10P H.264, XviD AVI, PGS-subtitled BluRay) — VAAPI
   encodes ~1.7–3.5× faster than software with first playlist ready in ~0.4–1.0s. Not yet
-  wired into `apps/server`. `jellyfin-compat` exists with discovery only
+  routed in `apps/server` (see below). `jellyfin-compat` exists with discovery only
   (`/System/Info/Public`, `/System/Ping`); the SvelteKit UI is served by the Node process
   at the root — see the Jellyfin Mobile decision below for why. **Auth is built** (see
   "Auth" below): first-run setup page, login/logout, and every `/api` route locked behind
@@ -59,7 +59,9 @@ Repo: https://github.com/miroreo/TessaTV (private).
   updated to match (`/api` → `localhost:8080`). This machine has a real AMD iGPU with
   VAAPI support (`/dev/dri/renderD128`) — the `HardwareAccel` strategy is scoped to
   `none`/`vaapi` for now (actually verifiable here) rather than guessing at NVENC/QSV
-  blind, structured so those slot in later without changing the abstraction.
+  blind, structured so those slot in later without changing the abstraction. `apps/server`
+  now selects the hardware accel at startup and owns a `TranscodeManager`, but no route
+  uses it yet — that's the playback API above.
 - ⬜ **M4 — Acquisition pipeline, first protocol.** Not started.
 - ⬜ **M5 — Second protocol adapter.** Not started.
 - ⬜ **M6 — Deeper Jellyfin-compat coverage.** Not started.
@@ -344,7 +346,7 @@ and by which indexer/download-client instances are enabled; it has no protocol- 
 media-type-specific branches. M4/M5 in the roadmap below exist specifically to prove this
 holds when the second protocol is added.
 
-### Streaming subsystem (built — not yet wired into the server)
+### Streaming subsystem (built — started by the server, no playback routes yet)
 
 `packages/streaming` deliberately knows nothing about Jellyfin; `jellyfin-compat` translates
 `DeviceProfile`/`PlaybackInfoResponse` to and from these shapes at its boundary. Pipeline:
@@ -363,7 +365,26 @@ holds when the second protocol is added.
 3. `startTranscodeSession(plan, { accel, directory, startTimeSeconds })` spawns one ffmpeg
    writing `index.m3u8` + segments into `directory`, exposing `-progress`-parsed
    `progress`, `waitForPlaylist()`, `stop()` (SIGTERM → SIGKILL), `dispose()` (stop +
-   delete output) and a never-rejecting `done`.
+   delete output, killing ffmpeg immediately) and a never-rejecting `done`.
+4. `TranscodeManager` owns all sessions: `maxConcurrent` running ffmpegs
+   (`TranscodeCapacityError` past that; finished sessions don't count), reaping anything
+   not `touch()`ed for `idleTimeoutMs`, and `seek()`, which keeps the session if that
+   position is already transcoded and restarts ffmpeg there if not. Its ids stay stable
+   across seeks. `start()` clears `session-*` directories orphaned by a crash — only those,
+   so a misconfigured `TRANSCODE_DIR` can't get a user's files deleted.
+
+**HDR.** A PQ/HLG source on a client without `supportsHdr` gets `VideoRangeNotSupported`,
+and every video transcode of an HDR source is tone-mapped to tagged BT.709 8-bit SDR
+(`toneMapFilters`). Always in software — see the implementation note on `tonemap_vaapi`.
+
+**Subtitles** are off unless `subtitleStreamIndex` is passed. Text subtitles become a
+`sidecar` action and don't affect delivery (direct play stays direct play); the caller gets
+the file from `extractWebVtt`, which reads the whole container (0.3–18s on real files) so
+its result should be cached. ASS styling and positioning are lost in that conversion. Image
+subtitles (PGS) become `burn-in`, which forces a transcode (`SubtitleBurnInRequired`).
+
+Config: `HARDWARE_ACCEL` (`auto`/`none`/`vaapi`), `VAAPI_DEVICE`, `TRANSCODE_DIR`,
+`MAX_CONCURRENT_TRANSCODES`.
 
 Hardware accel is a `HardwareAccel` strategy whose only job is producing a `VideoPipeline`
 (pre-`-i` args, `-vf` chain, encoder args); stream mapping, keyframe alignment and HLS
@@ -598,12 +619,20 @@ deleting them.)
   encode H.264/HEVC/AV1; decode H.264 8-bit, HEVC 8/10, AV1 8/10, VP9 8/10 — **not**
   10-bit H.264 (Hi10P anime) or MPEG-2/MPEG-4 (XviD), which correctly get software decode +
   hardware encode. Decode support must be matched on codec *and* bit depth together.
-- No HDR tone-mapping yet: `MediaProbe` flags PQ/HLG sources (`isHdr`) but both strategies
-  just convert to 8-bit SDR, which will look washed out. The current library has zero HDR
-  files, so this is unverifiable here for now — revisit when HDR content exists
-  (`tonemap_vaapi` / zscale+tonemap).
-- Subtitles are dropped from HLS output (`-sn`) for now; text-sub delivery (WebVTT) and
-  image-sub burn-in are compat-phase work.
+- `tonemap_vaapi` fails on this AMD iGPU ("VAAPI driver doesn't support HDR"), so
+  tone-mapping always runs in software, and `VaapiAccel` goes hardware decode + scale →
+  `hwdownload` → software tone-map → `hwupload` → hardware encode. Scaling *before* the
+  float-point tone-map is what makes this viable: 4K HDR → 1080p measured 0.5× realtime
+  scaling after, ~1.2–1.7× with this order. Verified visually on a real 4K PQ file.
+- Burn-in overlays after tone-mapping and scales the subtitle track to the target size
+  first (0.32× → 0.65–0.88× on 4K HDR). That's still below realtime with a transcoded
+  DTS track on this machine, so 4K HDR + PGS may buffer; 480p SDR + PGS runs at ~60×.
+- ffmpeg can take 12–40s+ to exit on SIGTERM with burn-in while its filter graph drains.
+  `stop()` escalates to SIGKILL after 5s, which leaves no `#EXT-X-ENDLIST`, and anything
+  reading that playlist as VOD waits forever. `dispose()` skips straight to SIGKILL because
+  the output is being deleted anyway — otherwise every seek would stall for 5s.
+- Most Matroska files don't report per-stream bitrates (998 of 1,470 in the real library),
+  so `audio.bitRate` being null is the normal case, not an edge case.
 - `DrizzleLibraryRepository.updateNode`'s SQL `SET` clause only listed the fields that had
   ever needed updating *so far* (title, sortTitle, monitored, qualityProfileId) — it
   silently dropped `parentId`, because no feature before series-merging ever needed to

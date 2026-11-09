@@ -21,6 +21,7 @@ export const DEFAULT_SEGMENT_SECONDS = 6;
 export function buildTranscodeArgs(plan: HlsPlaybackPlan, accel: HardwareAccel, output: HlsOutputOptions): string[] {
   const segmentSeconds = output.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS;
   const video = plan.video;
+  const burnInIndex = plan.subtitle?.kind === "burn-in" ? plan.subtitle.streamIndex : null;
   const pipeline: VideoPipeline | null =
     video?.kind === "transcode"
       ? accel.videoPipeline({
@@ -29,6 +30,7 @@ export function buildTranscodeArgs(plan: HlsPlaybackPlan, accel: HardwareAccel, 
           width: video.width,
           height: video.height,
           bitrate: video.bitrate,
+          burnIn: burnInIndex !== null,
         })
       : null;
 
@@ -37,13 +39,25 @@ export function buildTranscodeArgs(plan: HlsPlaybackPlan, accel: HardwareAccel, 
   if (output.startTimeSeconds) args.push("-ss", String(output.startTimeSeconds));
   args.push("-i", plan.path);
 
-  if (video) args.push("-map", `0:${video.streamIndex}`);
+  const burnInGraph =
+    video?.kind === "transcode" && pipeline && burnInIndex !== null
+      ? [
+          `[0:${video.streamIndex}]${pipeline.filters.join(",")}[base]`,
+          // After tone-mapping, so the subtitles' SDR colors aren't tone-mapped themselves.
+          `[0:${burnInIndex}]scale=${video.width}:${video.height}[subtitle]`,
+          `[base][subtitle]overlay=eof_action=pass${pipeline.postOverlayFilters.map((filter) => `,${filter}`).join("")}[video]`,
+        ].join(";")
+      : null;
+
+  if (burnInGraph) args.push("-filter_complex", burnInGraph, "-map", "[video]");
+  else if (video) args.push("-map", `0:${video.streamIndex}`);
   if (plan.audio) args.push("-map", `0:${plan.audio.streamIndex}`);
 
   if (video?.kind === "copy") {
     args.push("-c:v", "copy");
   } else if (video && pipeline) {
-    if (pipeline.filters.length > 0) args.push("-vf", pipeline.filters.join(","));
+    const filters = [...pipeline.filters, ...pipeline.postOverlayFilters];
+    if (!burnInGraph && filters.length > 0) args.push("-vf", filters.join(","));
     args.push(...pipeline.encoderArgs);
     // Aligns keyframes with segment boundaries so every segment starts independently decodable.
     args.push("-force_key_frames", `expr:gte(t,n_forced*${segmentSeconds})`);

@@ -13,6 +13,7 @@ const TRANSCODE_PLAN: HlsPlaybackPlan = {
   segmentContainer: "fmp4",
   video: { kind: "transcode", streamIndex: 0, source, codec: "h264", width: 1280, height: 720, bitrate: 4_000_000 },
   audio: { kind: "transcode", streamIndex: 2, codec: "aac", channels: 2, bitrate: 192_000 },
+  subtitle: null,
   reasons: ["VideoCodecNotSupported"],
 };
 
@@ -22,6 +23,7 @@ const REMUX_PLAN: HlsPlaybackPlan = {
   segmentContainer: "fmp4",
   video: { kind: "copy", streamIndex: 0, codec: "hevc" },
   audio: { kind: "copy", streamIndex: 1, codec: "aac" },
+  subtitle: null,
   reasons: ["ContainerNotSupported"],
 };
 
@@ -93,5 +95,22 @@ describe("buildTranscodeArgs", () => {
       "hvc1",
     );
     expect(buildTranscodeArgs(TRANSCODE_PLAN, new SoftwareAccel(), { directory: "/tmp/s" })).not.toContain("-tag:v");
+  });
+
+  it("draws burn-in subtitles after the base filters and before moving frames to the GPU", () => {
+    const vaapi = new VaapiAccel(
+      { device: "/dev/dri/renderD128", encode: ["h264"], decode: [{ codec: "hevc", bitDepth: 10 }] },
+      new SoftwareAccel(),
+    );
+    const args = buildTranscodeArgs({ ...TRANSCODE_PLAN, subtitle: { kind: "burn-in", streamIndex: 5 } }, vaapi, {
+      directory: "/tmp/out",
+    });
+    expect(valueAfter(args, "-filter_complex")).toBe(
+      "[0:0]scale_vaapi=w=1280:h=720:format=nv12,hwdownload,format=nv12[base];" +
+        "[0:5]scale=1280:720[subtitle];" +
+        "[base][subtitle]overlay=eof_action=pass,format=nv12,hwupload[video]",
+    );
+    expect(args.filter((_, i) => args[i - 1] === "-map")).toEqual(["[video]", "0:2"]);
+    expect(args).not.toContain("-vf");
   });
 });

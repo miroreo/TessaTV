@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -8,6 +10,11 @@ const envSchema = z.object({
   // its key is provided.
   TMDB_API_KEY: z.string().min(1).optional(),
   TVDB_API_KEY: z.string().min(1).optional(),
+  // `auto` falls back to software; an explicit `vaapi` that doesn't work fails startup.
+  HARDWARE_ACCEL: z.enum(["auto", "none", "vaapi"]).default("auto"),
+  VAAPI_DEVICE: z.string().min(1).optional(),
+  TRANSCODE_DIR: z.string().min(1).default(join(tmpdir(), "tessatv-transcodes")),
+  MAX_CONCURRENT_TRANSCODES: z.coerce.number().int().positive().default(3),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

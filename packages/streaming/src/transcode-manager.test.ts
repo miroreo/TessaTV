@@ -1,0 +1,123 @@
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SoftwareAccel } from "./hardware-accel/software.js";
+import type { HlsPlaybackPlan } from "./playback-plan.js";
+import { TranscodeCapacityError, TranscodeManager } from "./transcode-manager.js";
+import type { startTranscodeSession, TranscodeSession } from "./transcode-session.js";
+
+const PLAN: HlsPlaybackPlan = {
+  mode: "remux",
+  path: "/media/show.mkv",
+  segmentContainer: "fmp4",
+  video: { kind: "copy", streamIndex: 0, codec: "hevc" },
+  audio: { kind: "copy", streamIndex: 1, codec: "aac" },
+  subtitle: null,
+  reasons: ["ContainerNotSupported"],
+};
+
+function fakeSession(outTimeSeconds = 0, state = "running") {
+  return { state, progress: { outTimeSeconds, speed: 1 }, dispose: vi.fn(async () => {}) };
+}
+
+describe("TranscodeManager", () => {
+  let directory: string;
+  let nowMs: number;
+  let sessions: ReturnType<typeof fakeSession>[];
+  let startSession: ReturnType<typeof vi.fn>;
+
+  const manager = (maxConcurrent = 2) =>
+    new TranscodeManager({
+      directory,
+      accel: new SoftwareAccel(),
+      maxConcurrent,
+      idleTimeoutMs: 1_000,
+      now: () => nowMs,
+      startSession: startSession as unknown as typeof startTranscodeSession,
+    });
+
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), "tessatv-manager-test-"));
+    nowMs = 0;
+    sessions = [];
+    startSession = vi.fn(async () => {
+      const session = fakeSession();
+      sessions.push(session);
+      return session as unknown as TranscodeSession;
+    });
+  });
+  afterEach(() => rm(directory, { recursive: true, force: true }));
+
+  it("refuses to run more than the limit, but doesn't count finished transcodes", async () => {
+    const transcodes = manager(1);
+    await transcodes.begin(PLAN);
+    await expect(transcodes.begin(PLAN)).rejects.toBeInstanceOf(TranscodeCapacityError);
+
+    sessions[0]!.state = "completed";
+    await expect(transcodes.begin(PLAN)).resolves.toBeDefined();
+  });
+
+  it("reaps transcodes nobody has touched, freeing capacity", async () => {
+    const transcodes = manager(1);
+    const first = await transcodes.begin(PLAN);
+    nowMs = 1_001;
+    await transcodes.begin(PLAN);
+    expect(sessions[0]!.dispose).toHaveBeenCalled();
+    expect(transcodes.touch(first.id)).toBeNull();
+  });
+
+  it("keeps a transcode alive while it's being touched", async () => {
+    const transcodes = manager(2);
+    const first = await transcodes.begin(PLAN);
+    nowMs = 900;
+    expect(transcodes.touch(first.id)).not.toBeNull();
+    nowMs = 1_500;
+    await transcodes.begin(PLAN);
+    expect(sessions[0]!.dispose).not.toHaveBeenCalled();
+  });
+
+  it("doesn't restart ffmpeg for a seek into what's already transcoded", async () => {
+    const transcodes = manager();
+    const { id } = await transcodes.begin(PLAN, 100);
+    sessions[0]!.progress = { outTimeSeconds: 60, speed: 1 };
+    const sought = await transcodes.seek(id, 150);
+    expect(sought?.session).toBe(sessions[0]);
+    expect(startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([[500], [50]])("restarts at the new position for a seek outside it (%d)", async (seconds) => {
+    const transcodes = manager();
+    const { id } = await transcodes.begin(PLAN, 100);
+    sessions[0]!.progress = { outTimeSeconds: 60, speed: 1 };
+    const sought = await transcodes.seek(id, seconds);
+    expect(sessions[0]!.dispose).toHaveBeenCalled();
+    expect(sought).toMatchObject({ id, startTimeSeconds: seconds, session: sessions[1] });
+    const directories = startSession.mock.calls.map((call) => (call[1] as { directory: string }).directory);
+    expect(new Set(directories).size).toBe(2);
+  });
+
+  it("returns null for unknown ids", async () => {
+    const transcodes = manager();
+    expect(transcodes.touch("nope")).toBeNull();
+    await expect(transcodes.seek("nope", 1)).resolves.toBeNull();
+  });
+
+  it("on start, clears its own orphaned output and nothing else in the directory", async () => {
+    await mkdir(join(directory, "session-orphan"));
+    await writeFile(join(directory, "not-ours.txt"), "keep");
+    const transcodes = manager();
+    await transcodes.start();
+    expect(await readdir(directory)).toEqual(["not-ours.txt"]);
+    await transcodes.shutdown();
+  });
+
+  it("shutdown disposes everything and removes each session's directory", async () => {
+    const transcodes = manager();
+    await transcodes.begin(PLAN);
+    const stale = join(directory, (await transcodes.begin(PLAN)).id);
+    await transcodes.shutdown();
+    expect(sessions.every((session) => session.dispose.mock.calls.length === 1)).toBe(true);
+    expect((await readdir(directory)).some((name) => name.includes(stale))).toBe(false);
+  });
+});

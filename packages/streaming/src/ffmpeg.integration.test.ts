@@ -2,7 +2,7 @@
 // the arguments this package builds are proven to be accepted by ffmpeg — not just shaped
 // the way the unit tests expect. Skips when ffmpeg isn't on PATH. The VAAPI case also
 // skips unless the render node exists and detection finds a working encoder.
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -13,6 +13,7 @@ import { VaapiAccel } from "./hardware-accel/vaapi.js";
 import { probeMedia } from "./media-probe.js";
 import { resolvePlaybackPlan } from "./playback-plan.js";
 import { runCommand } from "./process.js";
+import { extractWebVtt } from "./subtitles.js";
 import { iosLikeCapabilities } from "./test-fixtures.js";
 import { startTranscodeSession } from "./transcode-session.js";
 
@@ -74,6 +75,37 @@ describe.skipIf(!ffmpegAvailable)("streaming against real ffmpeg", () => {
     expect(output.audioStreams[0]).toMatchObject({ codec: "aac", channels: 2 });
     expect(output.durationSeconds).toBeCloseTo(4, 0);
   }, 60_000);
+
+  it.each(accels)("tone-maps PQ HDR to tagged 8-bit SDR with %s", async (name, makeAccel) => {
+    const hdrPath = join(root, "hdr.mkv");
+    const synthesized = await runCommand("ffmpeg", [
+      "-hide_banner", "-v", "error", "-y",
+      "-f", "lavfi", "-i", "testsrc2=s=640x360:r=24:d=2",
+      // Colors aren't truly PQ — only the tags matter to what's under test here.
+      "-pix_fmt", "yuv420p10le",
+      "-c:v", "libx265", "-x265-params", "log-level=error:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
+      hdrPath,
+    ]);
+    if (synthesized.exitCode !== 0) throw new Error(`Couldn't synthesize HDR sample: ${synthesized.stderr}`);
+    const probe = await probeMedia(hdrPath);
+    expect(probe.videoStreams[0]?.isHdr).toBe(true);
+
+    const output = await runToCompletion(resolvePlaybackPlan(probe, iosLikeCapabilities()), makeAccel(), join(root, `hdr-${name}`));
+    expect(output.videoStreams[0]).toMatchObject({ codec: "h264", bitDepth: 8, isHdr: false });
+  }, 60_000);
+
+  it("extracts text subtitles as WebVTT", async () => {
+    const srtPath = join(root, "subs.srt");
+    await writeFile(srtPath, "1\n00:00:01,000 --> 00:00:02,000\nHello there\n");
+    const mkvPath = join(root, "with-subs.mkv");
+    const muxed = await runCommand("ffmpeg", ["-hide_banner", "-v", "error", "-y", "-i", samplePath, "-i", srtPath, "-map", "0", "-map", "1", "-c", "copy", mkvPath]);
+    if (muxed.exitCode !== 0) throw new Error(`Couldn't mux subtitles: ${muxed.stderr}`);
+    const subtitle = (await probeMedia(mkvPath)).subtitleStreams[0]!;
+    const vtt = await extractWebVtt(mkvPath, subtitle.index);
+    expect(vtt.startsWith("WEBVTT")).toBe(true);
+    expect(vtt).toContain("00:01.000 --> 00:02.000");
+    expect(vtt).toContain("Hello there");
+  });
 
   async function runToCompletion(
     plan: ReturnType<typeof resolvePlaybackPlan>,

@@ -114,9 +114,17 @@ export class TranscodeSession {
     return this.done;
   }
 
-  /** Stops ffmpeg and deletes everything it wrote. */
+  /**
+   * Kills ffmpeg outright and deletes everything it wrote. Nothing will read the output, so
+   * there's no reason to wait out a graceful exit, which subtitle burn-in stretches past 10s
+   * while its filter graph drains — that wait would otherwise stall every seek.
+   */
   async dispose(): Promise<void> {
-    await this.stop();
+    if (this.currentState === "running") {
+      this.stopRequested = true;
+      this.process.kill("SIGKILL");
+      await this.done;
+    }
     await rm(this.outputDirectory, { recursive: true, force: true });
   }
 
