@@ -65,6 +65,14 @@ describe("parseEpisodeFilename", () => {
     });
   });
 
+  it("reads a multi-episode file as its first episode", () => {
+    expect(parseEpisodeFilename("Show.S01E01E02.Double.Feature.mkv")).toEqual({ season: 1, episode: 1, title: "Double Feature" });
+  });
+
+  it("handles the ' - SxxExx - Title' convention", () => {
+    expect(parseEpisodeFilename("The Expanse - S01E02 - The Big Empty.mkv")).toEqual({ season: 1, episode: 2, title: "The Big Empty" });
+  });
+
   it("does not misread a resolution tag like 1920x1080 as an NxEE episode token", () => {
     expect(parseEpisodeFilename("Random.Clip.1920x1080.mkv")).toBeNull();
   });
