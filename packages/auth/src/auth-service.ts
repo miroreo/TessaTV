@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AuthSession, AuthSessionRepository, LoginResponse, PublicUser, User, UserRepository } from "@tessatv/domain";
-import { hashPassword, verifyPassword } from "./password.js";
+import { hashPassword, needsRehash, verifyPassword } from "./password.js";
 import { generateToken, hashToken } from "./token.js";
 
 export const MIN_PASSWORD_LENGTH = 8;
@@ -65,6 +65,9 @@ export class AuthService {
     const user = await this.users.getUserByUsername(username.trim());
     const valid = await verifyPassword(password, user?.passwordHash ?? (await this.dummyHash));
     if (!user || !valid) throw new AuthError("invalid_credentials", "Invalid username or password");
+    if (needsRehash(user.passwordHash)) {
+      await this.users.updatePasswordHash(user.id, await hashPassword(password), this.now());
+    }
     return this.startSession(user, clientName);
   }
 
