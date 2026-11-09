@@ -4,16 +4,6 @@ export const SESSION_COOKIE = "tessatv_session";
 /** Browsers cap cookie lifetime at 400 days; the session itself lasts until logout. */
 const COOKIE_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
 
-function readCookie(header: string | undefined, name: string): string | null {
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const separator = part.indexOf("=");
-    if (separator < 0) continue;
-    if (part.slice(0, separator).trim() === name) return decodeURIComponent(part.slice(separator + 1).trim());
-  }
-  return null;
-}
-
 /**
  * The browser UI authenticates with an HttpOnly cookie (so page scripts never hold the
  * token); other clients send `Authorization: Bearer <token>`.
@@ -24,19 +14,19 @@ export function readSessionToken(request: FastifyRequest): string | null {
     const token = authorization.slice("bearer ".length).trim();
     if (token) return token;
   }
-  return readCookie(request.headers.cookie, SESSION_COOKIE);
+  return request.cookies[SESSION_COOKIE] ?? null;
 }
 
-function cookieAttributes(request: FastifyRequest, maxAge: number): string {
+function cookieOptions(request: FastifyRequest) {
   // `Secure` only over HTTPS: the LAN/Tailscale dev setup is plain HTTP, where a Secure
   // cookie would never be sent back.
-  return `Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${request.protocol === "https" ? "; Secure" : ""}`;
+  return { path: "/", httpOnly: true, sameSite: "lax", secure: request.protocol === "https" } as const;
 }
 
 export function setSessionCookie(request: FastifyRequest, reply: FastifyReply, token: string): void {
-  reply.header("set-cookie", `${SESSION_COOKIE}=${encodeURIComponent(token)}; ${cookieAttributes(request, COOKIE_MAX_AGE_SECONDS)}`);
+  reply.setCookie(SESSION_COOKIE, token, { ...cookieOptions(request), maxAge: COOKIE_MAX_AGE_SECONDS });
 }
 
 export function clearSessionCookie(request: FastifyRequest, reply: FastifyReply): void {
-  reply.header("set-cookie", `${SESSION_COOKIE}=; ${cookieAttributes(request, 0)}`);
+  reply.clearCookie(SESSION_COOKIE, cookieOptions(request));
 }
