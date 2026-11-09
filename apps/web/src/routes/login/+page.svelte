@@ -13,5 +13,9 @@
   }
 </script>
 
-<h1>Sign in</h1>
-<CredentialsForm submitLabel="Sign in" onsubmit={login} />
+<div class="card bg-base-200 mx-auto mt-12 max-w-sm">
+  <div class="card-body items-center">
+    <h1 class="card-title text-2xl">Sign in</h1>
+    <CredentialsForm submitLabel="Sign in" onsubmit={login} />
+  </div>
+</div>
