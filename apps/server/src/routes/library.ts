@@ -1,13 +1,13 @@
-import type { LibraryRepository } from "@tessatv/domain";
+import type { LibraryNodesResponse, LibraryRepository, UnitsResponse } from "@tessatv/domain";
 import type { FastifyInstance } from "fastify";
 
 export function registerLibraryRoutes(app: FastifyInstance, libraryRepository: LibraryRepository): void {
-  app.get("/api/library", async () => {
+  app.get("/api/library", async (): Promise<LibraryNodesResponse> => {
     const roots = await libraryRepository.listChildren(null);
     return { items: roots };
   });
 
-  app.get<{ Params: { id: string } }>("/api/library/:id/children", async (request) => {
+  app.get<{ Params: { id: string } }>("/api/library/:id/children", async (request): Promise<LibraryNodesResponse> => {
     const children = await libraryRepository.listChildren(request.params.id);
     return { items: children };
   });
@@ -19,6 +19,6 @@ export function registerLibraryRoutes(app: FastifyInstance, libraryRepository: L
       return { error: "not_found" };
     }
     const units = await libraryRepository.listUnits(request.params.id);
-    return { items: units };
+    return { items: units } satisfies UnitsResponse;
   });
 }
