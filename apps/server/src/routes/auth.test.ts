@@ -31,6 +31,10 @@ class InMemoryUsers implements UserRepository {
   async createUser(user: User) {
     this.users.push(user);
   }
+  async updatePasswordHash(id: string, passwordHash: string, updatedAt: Date) {
+    const index = this.users.findIndex((user) => user.id === id);
+    if (index >= 0) this.users[index] = { ...this.users[index]!, passwordHash, updatedAt };
+  }
 }
 
 class InMemorySessions implements AuthSessionRepository {
@@ -115,7 +119,9 @@ describe("auth routes", () => {
 
   it("rejects malformed and weak setup input", async () => {
     const app = buildTestApp();
-    expect((await app.inject({ method: "POST", url: "/api/auth/setup", payload: { username: "tessa" } })).statusCode).toBe(400);
+    const malformed = await app.inject({ method: "POST", url: "/api/auth/setup", payload: { username: "tessa" } });
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.json().error).toBe("invalid_request");
     const weak = await app.inject({ method: "POST", url: "/api/auth/setup", payload: { username: "tessa", password: "short" } });
     expect(weak.statusCode).toBe(400);
     expect(weak.json().error).toBe("weak_password");

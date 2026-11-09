@@ -38,6 +38,14 @@ describe("DrizzleUserRepository", () => {
     await expect(users.createUser(fakeUser(name.toLowerCase()))).rejects.toThrow();
   });
 
+  it("updates a user's password hash", async () => {
+    const user = fakeUser(`rehash-${randomUUID()}`);
+    await users.createUser(user);
+    const later = new Date(user.updatedAt.getTime() + 60_000);
+    await users.updatePasswordHash(user.id, "$argon2id$new", later);
+    expect(await users.getUser(user.id)).toMatchObject({ passwordHash: "$argon2id$new", updatedAt: later });
+  });
+
   it("round-trips sessions by token hash and cascades on user delete", async () => {
     const user = fakeUser(`session-${randomUUID()}`);
     await users.createUser(user);
