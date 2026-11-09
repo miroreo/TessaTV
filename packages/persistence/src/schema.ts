@@ -102,15 +102,6 @@ export const metadataCache = pgTable(
   (table) => [primaryKey({ columns: [table.provider, table.externalId] })],
 );
 
-/** Scheduling state for named background jobs — persisted so `next_run_at` survives an app
- * restart instead of resetting to "run immediately" every time the process starts. */
-export const scheduledJob = pgTable("scheduled_job", {
-  name: text("name").primaryKey(),
-  nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
-  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
-  lastError: text("last_error"),
-});
-
 /** `user` is reserved in Postgres, hence `app_user`. One account table for TessaTV's UI and
  * Jellyfin-API clients alike. */
 export const appUser = pgTable(

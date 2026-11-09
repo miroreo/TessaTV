@@ -2,12 +2,11 @@ import { AuthService } from "@tessatv/auth";
 import { loadConfig } from "@tessatv/config";
 import { type MetadataProvidersByKind, refreshLibraryMetadata } from "@tessatv/library";
 import { deriveServerId } from "@tessatv/jellyfin-compat";
-import { JobRunner } from "@tessatv/jobs";
+import { JobScheduler } from "@tessatv/jobs";
 import { CachedMetadataProvider, TmdbClient, TmdbMetadataProvider, TvdbClient, TvdbMetadataProvider } from "@tessatv/metadata";
 import {
   createDatabase,
   DrizzleAuthSessionRepository,
-  DrizzleJobRepository,
   DrizzleLibraryRepository,
   DrizzleMetadataCacheRepository,
   DrizzleUserRepository,
@@ -16,7 +15,8 @@ import { selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
 import { loadWebUiHandler } from "./routes/web-ui.js";
 
-const METADATA_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // matches CachedMetadataProvider's default TTL
+// Daily, matching CachedMetadataProvider's default TTL.
+const METADATA_REFRESH_CRON = "0 4 * * *";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
@@ -60,10 +60,12 @@ const app = buildApp({
   ...(webUiHandler ? { webUiHandler } : {}),
 });
 
-const jobRunner = new JobRunner(new DrizzleJobRepository(db));
-jobRunner.register({
+const jobs = new JobScheduler(config.DATABASE_URL, {
+  onError: (error) => app.log.error(error, "job scheduler error"),
+});
+jobs.register({
   name: "metadata-refresh",
-  intervalMs: METADATA_REFRESH_INTERVAL_MS,
+  cron: METADATA_REFRESH_CRON,
   handler: async () => {
     const summary = await refreshLibraryMetadata(libraryRepository, metadataProviders);
     if (summary.errors.length > 0) {
@@ -81,7 +83,7 @@ app
     if (!tvdbProvider) app.log.warn("TVDB_API_KEY not set — series metadata routes will return 503 until it is configured");
     app.log.info(`Transcoding with hardware accel: ${hardwareAccel.kind}`);
     await transcodes.start();
-    await jobRunner.start();
+    await jobs.start();
   })
   .catch((error: unknown) => {
     app.log.error(error);
@@ -91,6 +93,6 @@ app
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     // Leaves no ffmpeg behind writing into a directory nothing will clean up until next boot.
-    void transcodes.shutdown().finally(() => process.exit(0));
+    void Promise.allSettled([transcodes.shutdown(), jobs.stop()]).finally(() => process.exit(0));
   });
 }
