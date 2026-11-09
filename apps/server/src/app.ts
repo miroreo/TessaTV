@@ -3,6 +3,7 @@ import type { LibraryRepository } from "@tessatv/domain";
 import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
 import type { MetadataProvidersByKind } from "@tessatv/library";
 import Fastify, { type FastifyInstance } from "fastify";
+import { hasZodFastifySchemaValidationErrors, validatorCompiler } from "fastify-type-provider-zod";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerLibraryImportRoutes } from "./routes/library-import.js";
 import { registerLibraryMergeRoutes } from "./routes/library-merge.js";
@@ -28,6 +29,15 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   // Case-insensitive routing is required by Jellyfin clients (see registerJellyfinCompat);
   // it applies router-wide, so TessaTV's own /api routes match case-insensitively too.
   const app = Fastify({ logger: true, routerOptions: { caseSensitive: false } });
+
+  // Routes declare zod schemas; a request that fails one gets a uniform 400.
+  app.setValidatorCompiler(validatorCompiler);
+  app.setErrorHandler((error, _request, reply) => {
+    if (hasZodFastifySchemaValidationErrors(error)) {
+      return reply.code(400).send({ error: "invalid_request", message: error.message, issues: error.validation });
+    }
+    return reply.send(error);
+  });
 
   app.get("/health", async () => ({ status: "ok" }));
 

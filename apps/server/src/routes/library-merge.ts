@@ -1,18 +1,24 @@
 import type { LibraryRepository } from "@tessatv/domain";
 import { confirmSeriesMerge, mergeDuplicateSeries, type MetadataProvidersByKind } from "@tessatv/library";
 import type { FastifyInstance } from "fastify";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
+import { z } from "zod";
+
+const confirmBody = z.object({ primaryNodeId: z.string().min(1), duplicateNodeId: z.string().min(1) });
 
 export function registerLibraryMergeRoutes(
-  app: FastifyInstance,
+  server: FastifyInstance,
   libraryRepository: LibraryRepository,
   metadataProviders: MetadataProvidersByKind,
 ): void {
+  const app = server.withTypeProvider<ZodTypeProvider>();
   app.post("/api/library/merge-duplicates", async () => {
     return mergeDuplicateSeries(libraryRepository, metadataProviders.series);
   });
 
-  app.post<{ Body: { primaryNodeId: string; duplicateNodeId: string } }>(
+  app.post(
     "/api/library/merge-duplicates/confirm",
+    { schema: { body: confirmBody } },
     async (request, reply) => {
       const { primaryNodeId, duplicateNodeId } = request.body;
       const [primary, duplicate] = await Promise.all([
