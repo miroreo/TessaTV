@@ -296,6 +296,9 @@ importers:
 
   packages/library:
     dependencies:
+      '@ctrl/video-filename-parser':
+        specifier: ^5.12.0
+        version: 5.12.0
       '@tessatv/domain':
         specifier: workspace:*
         version: link:../domain
@@ -335,6 +338,10 @@ packages:
   '@boundaries/elements@1.2.0':
     resolution: {integrity: sha512-W65Gum02liMd3hmNrLmDBX1u5BmRMcunouFjLXyhxHnNY4YlK1kTxsgfflZ5XBGSnPnO0MkiUzAcoGzYrlx0RQ==}
     engines: {node: '>=18.18'}
+
+  '@ctrl/video-filename-parser@5.12.0':
+    resolution: {integrity: sha512-PnN/2X/RD2x/sy2dSZvnxw0l9M17laDdci/3/eHKXGdYP/GmmEDa48gQma+9PhylRdZcxgD8RJjjIbtITg29Dw==}
+    engines: {node: '>=20'}
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
@@ -2856,6 +2863,8 @@ snapshots:
       - eslint-import-resolver-typescript
       - eslint-import-resolver-webpack
       - supports-color
+
+  '@ctrl/video-filename-parser@5.12.0': {}
 
   '@drizzle-team/brocli@0.10.2': {}
 
