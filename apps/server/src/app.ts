@@ -2,6 +2,7 @@ import type { AuthService } from "@tessatv/auth";
 import type { LibraryRepository } from "@tessatv/domain";
 import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
 import type { MetadataProvidersByKind } from "@tessatv/library";
+import fastifyCookie from "@fastify/cookie";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerLibraryImportRoutes } from "./routes/library-import.js";
@@ -28,6 +29,8 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   // Case-insensitive routing is required by Jellyfin clients (see registerJellyfinCompat);
   // it applies router-wide, so TessaTV's own /api routes match case-insensitively too.
   const app = Fastify({ logger: true, routerOptions: { caseSensitive: false } });
+
+  app.register(fastifyCookie);
 
   app.get("/health", async () => ({ status: "ok" }));
 
