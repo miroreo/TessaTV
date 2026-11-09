@@ -9,6 +9,7 @@ export * from "./release.js";
 export * from "./grab.js";
 export * from "./job.js";
 export * from "./user.js";
+export * from "./api.js";
 export * from "./ports/library-repository.js";
 export * from "./ports/quality-repository.js";
 export * from "./ports/metadata-cache-repository.js";

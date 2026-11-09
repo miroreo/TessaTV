@@ -1,5 +1,5 @@
 import { redirect } from "@sveltejs/kit";
-import type { SessionState } from "$lib/session.js";
+import type { SessionResponse } from "@tessatv/domain";
 import type { LayoutLoad } from "./$types.js";
 
 const SETUP_PATH = "/setup";
@@ -11,7 +11,7 @@ const LOGIN_PATH = "/login";
  * this just sends people to the right page instead of a wall of 401s.
  */
 export const load: LayoutLoad = async ({ fetch, url }) => {
-  const session = (await (await fetch("/api/auth/session")).json()) as SessionState;
+  const session = (await (await fetch("/api/auth/session")).json()) as SessionResponse;
   const path = url.pathname;
   if (session.needsSetup) {
     if (path !== SETUP_PATH) redirect(307, SETUP_PATH);
