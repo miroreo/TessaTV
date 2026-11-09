@@ -1,4 +1,5 @@
 <script lang="ts">
+  import "../app.css";
   import { goto, invalidateAll } from "$app/navigation";
   import type { Snippet } from "svelte";
   import type { LayoutData } from "./$types.js";
@@ -17,39 +18,15 @@
 </svelte:head>
 
 {#if data.session.user}
-  <header>
-    <strong>TessaTV</strong>
-    <span>
-      {data.session.user.username}
-      <button type="button" onclick={logout}>Log out</button>
-    </span>
+  <header class="navbar bg-base-200 px-4">
+    <a href="/" class="flex-1 text-xl font-bold">TessaTV</a>
+    <div class="flex items-center gap-2">
+      <span class="text-sm opacity-70">{data.session.user.username}</span>
+      <button type="button" class="btn btn-ghost btn-sm" onclick={logout}>Log out</button>
+    </div>
   </header>
 {/if}
 
-<main>
+<main class="mx-auto max-w-5xl p-4">
   {@render children()}
 </main>
-
-<style>
-  :global(body) {
-    margin: 0;
-    font-family: system-ui, sans-serif;
-    background: #111;
-    color: #eee;
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid #333;
-  }
-  main {
-    padding: 1rem;
-    max-width: 60rem;
-    margin: 0 auto;
-  }
-  button {
-    margin-left: 0.5rem;
-  }
-</style>

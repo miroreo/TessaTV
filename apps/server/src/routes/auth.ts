@@ -1,11 +1,12 @@
 import { AuthError, type AuthErrorCode, type AuthService } from "@tessatv/auth";
+import type { LoginResponse, PublicUser, SessionResponse } from "@tessatv/domain";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { clearSessionCookie, readSessionToken, setSessionCookie } from "../session-token.js";
 
 declare module "fastify" {
   interface FastifyRequest {
     /** Set by the `/api` auth hook on every authenticated request. */
-    user?: { id: string; username: string; isAdmin: boolean };
+    user?: PublicUser;
   }
 }
 
@@ -51,7 +52,7 @@ export function registerAuthRoutes(app: FastifyInstance, auth: AuthService): voi
   });
 
   /** Everything the UI needs to decide between the setup page, login page, and the app. */
-  app.get("/api/auth/session", async (request) => {
+  app.get("/api/auth/session", async (request): Promise<SessionResponse> => {
     const token = readSessionToken(request);
     const authenticated = token ? await auth.authenticate(token) : null;
     return { needsSetup: await auth.needsSetup(), user: authenticated?.user ?? null };
@@ -63,7 +64,7 @@ export function registerAuthRoutes(app: FastifyInstance, auth: AuthService): voi
     try {
       const result = await auth.completeSetup(input.username, input.password, clientName(request));
       setSessionCookie(request, reply, result.token);
-      return { user: result.user, token: result.token };
+      return { user: result.user, token: result.token } satisfies LoginResponse;
     } catch (error) {
       return sendAuthError(reply, error);
     }
@@ -75,7 +76,7 @@ export function registerAuthRoutes(app: FastifyInstance, auth: AuthService): voi
     try {
       const result = await auth.login(input.username, input.password, clientName(request));
       setSessionCookie(request, reply, result.token);
-      return { user: result.user, token: result.token };
+      return { user: result.user, token: result.token } satisfies LoginResponse;
     } catch (error) {
       return sendAuthError(reply, error);
     }

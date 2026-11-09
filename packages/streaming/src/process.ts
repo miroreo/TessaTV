@@ -1,4 +1,5 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
+import { execa } from "execa";
 import type { Readable } from "node:stream";
 
 /**
@@ -16,6 +17,7 @@ export interface SpawnedProcess {
 
 export type ProcessSpawner = (command: string, args: readonly string[]) => SpawnedProcess;
 
+/** Plain `spawn` for long-running ffmpeg: the session listens to its events directly. */
 export const spawnProcess: ProcessSpawner = (command, args) =>
   spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"] });
 
@@ -28,14 +30,9 @@ export interface CommandResult {
 /** Runs a short-lived command to completion. Never throws on a non-zero exit — callers decide. */
 export type CommandRunner = (command: string, args: readonly string[]) => Promise<CommandResult>;
 
-export const runCommand: CommandRunner = (command, args) =>
-  new Promise((resolve, reject) => {
-    execFile(command, [...args], { maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error && typeof error.code !== "number") {
-        // Spawn-level failure (e.g. binary not found), not a non-zero exit.
-        reject(error);
-        return;
-      }
-      resolve({ exitCode: error ? (error.code as number) : 0, stdout, stderr });
-    });
-  });
+export const runCommand: CommandRunner = async (command, args) => {
+  const result = await execa(command, args, { reject: false, stripFinalNewline: false, maxBuffer: 64 * 1024 * 1024 });
+  // Spawn-level failure (e.g. binary not found), not a non-zero exit.
+  if (result.exitCode === undefined) throw result;
+  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+};

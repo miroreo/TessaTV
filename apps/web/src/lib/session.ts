@@ -1,13 +1,4 @@
-export interface SessionUser {
-  id: string;
-  username: string;
-  isAdmin: boolean;
-}
-
-export interface SessionState {
-  needsSetup: boolean;
-  user: SessionUser | null;
-}
+import type { ApiErrorResponse } from "@tessatv/domain";
 
 /** POSTs credentials to an auth endpoint; returns an error message, or null on success. */
 export async function submitCredentials(
@@ -21,6 +12,6 @@ export async function submitCredentials(
     body: JSON.stringify({ username, password }),
   });
   if (response.ok) return null;
-  const body = (await response.json().catch(() => null)) as { message?: string } | null;
+  const body = (await response.json().catch(() => null)) as ApiErrorResponse | null;
   return body?.message ?? `Request failed (${response.status})`;
 }

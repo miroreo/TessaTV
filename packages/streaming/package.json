@@ -12,5 +12,8 @@
     "build": "tsc -b",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "execa": "^10.2.1"
   }
 }
