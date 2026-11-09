@@ -22,6 +22,10 @@ class InMemoryUsers implements UserRepository {
   async createUser(user: User) {
     this.users.push(user);
   }
+  async updatePasswordHash(id: string, passwordHash: string, updatedAt: Date) {
+    const index = this.users.findIndex((user) => user.id === id);
+    if (index >= 0) this.users[index] = { ...this.users[index]!, passwordHash, updatedAt };
+  }
 }
 
 class InMemorySessions implements AuthSessionRepository {
@@ -89,6 +93,24 @@ describe("AuthService", () => {
     const second = await auth.login("tessa", "hunter2hunter2");
     expect(second.user.id).toBe(first.user.id);
     expect(second.token).not.toBe(first.token);
+  });
+
+  it("upgrades a legacy scrypt hash to Argon2id on successful login", async () => {
+    const { users, auth } = setup();
+    const now = new Date();
+    users.users.push({
+      id: "legacy",
+      username: "old-timer",
+      // "legacy password" hashed by the pre-Argon2 scrypt code.
+      passwordHash:
+        "scrypt$1024$8$1$AAAAAAAAAAAAAAAAAAAAAA==$IbaAHYC6LGP6AdIGYpO90hmeSs8RSTupJrMFD431IZRsVygrRS0Yb5F581vxfQUkquWyyudJXzTgGEwC+/HtQA==",
+      isAdmin: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await auth.login("old-timer", "legacy password");
+    expect(users.users[0]!.passwordHash).toMatch(/^\$argon2id\$/);
+    await expect(auth.login("old-timer", "legacy password")).resolves.toBeDefined();
   });
 
   it("gives the same error for a wrong password and an unknown user", async () => {

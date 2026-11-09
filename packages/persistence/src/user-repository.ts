@@ -53,6 +53,10 @@ export class DrizzleUserRepository implements UserRepository {
   async createUser(user: User): Promise<void> {
     await this.db.insert(appUser).values(user);
   }
+
+  async updatePasswordHash(id: string, passwordHash: string, updatedAt: Date): Promise<void> {
+    await this.db.update(appUser).set({ passwordHash, updatedAt }).where(eq(appUser.id, id));
+  }
 }
 
 export class DrizzleAuthSessionRepository implements AuthSessionRepository {

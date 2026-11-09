@@ -31,6 +31,10 @@ class InMemoryUsers implements UserRepository {
   async createUser(user: User) {
     this.users.push(user);
   }
+  async updatePasswordHash(id: string, passwordHash: string, updatedAt: Date) {
+    const index = this.users.findIndex((user) => user.id === id);
+    if (index >= 0) this.users[index] = { ...this.users[index]!, passwordHash, updatedAt };
+  }
 }
 
 class InMemorySessions implements AuthSessionRepository {

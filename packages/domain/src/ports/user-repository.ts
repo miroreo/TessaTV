@@ -12,6 +12,7 @@ export interface UserRepository {
   createFirstUser(user: User): Promise<boolean>;
   /** Throws if the username is already taken (case-insensitively). */
   createUser(user: User): Promise<void>;
+  updatePasswordHash(id: string, passwordHash: string, updatedAt: Date): Promise<void>;
 }
 
 export interface AuthSessionRepository {
