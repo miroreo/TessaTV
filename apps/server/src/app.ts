@@ -2,6 +2,7 @@ import type { AuthService } from "@tessatv/auth";
 import type { LibraryRepository } from "@tessatv/domain";
 import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
 import type { MetadataProvidersByKind } from "@tessatv/library";
+import fastifyCookie from "@fastify/cookie";
 import Fastify, { type FastifyInstance } from "fastify";
 import { hasZodFastifySchemaValidationErrors, validatorCompiler } from "fastify-type-provider-zod";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -38,6 +39,8 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
     }
     return reply.send(error);
   });
+
+  app.register(fastifyCookie);
 
   app.get("/health", async () => ({ status: "ok" }));
 

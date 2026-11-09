@@ -3,12 +3,12 @@ import { TvdbClient } from "./tvdb-client.js";
 import { TvdbMetadataProvider } from "./tvdb-provider.js";
 
 function fakeResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 404 ? "Not Found" : status === 401 ? "Unauthorized" : "OK",
-    json: async () => body,
-  } as Response;
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+/** The URL of the nth request the client made. */
+function requestedUrl(fetchImpl: { mock: { calls: unknown[][] } }, call: number): URL {
+  return new URL((fetchImpl.mock.calls[call]![0] as Request).url);
 }
 
 function envelope<T>(data: T) {
@@ -34,7 +34,7 @@ describe("TvdbMetadataProvider", () => {
     expect(candidates).toEqual([
       { externalId: "81189", title: "Breaking Bad", year: 2008, overview: "...", posterUrl: "https://x/p.jpg" },
     ]);
-    const searchUrl = fetchImpl.mock.calls[1]![0] as URL;
+    const searchUrl = requestedUrl(fetchImpl, 1);
     expect(searchUrl.pathname).toBe("/v4/search");
     expect(searchUrl.searchParams.get("type")).toBe("series");
   });
@@ -103,7 +103,7 @@ describe("TvdbMetadataProvider", () => {
       backdropUrl: "https://x/background.jpg",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
-    const translationsUrl = fetchImpl.mock.calls[2]![0] as URL;
+    const translationsUrl = requestedUrl(fetchImpl, 2);
     expect(translationsUrl.pathname).toBe("/v4/movies/169/translations/eng");
   });
 

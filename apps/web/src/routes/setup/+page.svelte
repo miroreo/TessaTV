@@ -13,6 +13,10 @@
   }
 </script>
 
-<h1>Welcome to TessaTV</h1>
-<p>Create the administrator account to finish setting up this server.</p>
-<CredentialsForm submitLabel="Create account" confirmPassword onsubmit={createAdmin} />
+<div class="card bg-base-200 mx-auto mt-12 max-w-sm">
+  <div class="card-body items-center text-center">
+    <h1 class="card-title text-2xl">Welcome to TessaTV</h1>
+    <p class="opacity-70">Create the administrator account to finish setting up this server.</p>
+    <CredentialsForm submitLabel="Create account" confirmPassword onsubmit={createAdmin} />
+  </div>
+</div>

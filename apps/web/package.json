@@ -19,8 +19,11 @@
   "devDependencies": {
     "@sveltejs/kit": "^2.9.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tailwindcss/vite": "^4.3.5",
+    "daisyui": "^5.7.50",
     "svelte": "^5.9.1",
     "svelte-check": "^4.1.1",
+    "tailwindcss": "^4.3.5",
     "vite": "^6.0.3"
   }
 }
