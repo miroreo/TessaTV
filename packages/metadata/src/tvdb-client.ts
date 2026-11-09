@@ -1,3 +1,6 @@
+import ky, { type KyInstance } from "ky";
+import { nullOn404, type QueryParams } from "./http.js";
+
 const DEFAULT_BASE_URL = "https://api4.thetvdb.com/v4";
 
 export interface TvdbClientOptions {
@@ -20,57 +23,47 @@ interface TvdbEnvelope<T> {
  */
 export class TvdbClient {
   private readonly apiKey: string;
-  private readonly baseUrl: string;
-  private readonly fetchImpl: typeof fetch;
+  private readonly http: KyInstance;
   private token: string | null = null;
 
   constructor(options: TvdbClientOptions) {
     this.apiKey = options.apiKey;
-    this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.http = ky.create({
+      prefix: options.baseUrl ?? DEFAULT_BASE_URL,
+      ...(options.fetchImpl ? { fetch: options.fetchImpl } : {}),
+      hooks: {
+        beforeRequest: [
+          async ({ request }) => {
+            if (new URL(request.url).pathname.endsWith("/login")) return;
+            request.headers.set("Authorization", `Bearer ${this.token ?? (await this.login())}`);
+          },
+        ],
+        afterResponse: [
+          async ({ request, response, retryCount }) => {
+            if (response.status !== 401 || retryCount > 0 || new URL(request.url).pathname.endsWith("/login")) return;
+            this.token = null;
+            const headers = new Headers(request.headers);
+            headers.set("Authorization", `Bearer ${await this.login()}`);
+            return ky.retry({ request: new Request(request, { headers }) });
+          },
+        ],
+      },
+    });
   }
 
   private async login(): Promise<string> {
-    const response = await this.fetchImpl(`${this.baseUrl}/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apikey: this.apiKey }),
-    });
-    if (!response.ok) {
-      throw new Error(`TheTVDB login failed: ${response.status} ${response.statusText}`);
-    }
-    const body = (await response.json()) as TvdbEnvelope<{ token: string }>;
+    const body = await this.http.post("login", { json: { apikey: this.apiKey } }).json<TvdbEnvelope<{ token: string }>>();
     this.token = body.data.token;
     return this.token;
   }
 
-  async get<T>(path: string, params: Record<string, string | undefined> = {}, isRetry = false): Promise<T> {
-    const url = new URL(`${this.baseUrl}${path}`);
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined) url.searchParams.set(key, value);
-    }
-
-    const token = this.token ?? (await this.login());
-    const response = await this.fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } });
-
-    if (response.status === 401 && !isRetry) {
-      this.token = null;
-      return this.get<T>(path, params, true);
-    }
-    if (!response.ok) {
-      throw new Error(`TheTVDB request failed: ${response.status} ${response.statusText} (${url.pathname})`);
-    }
-    const body = (await response.json()) as TvdbEnvelope<T>;
+  async get<T>(path: string, params: QueryParams = {}): Promise<T> {
+    const body = await this.http.get(path, { searchParams: params }).json<TvdbEnvelope<T>>();
     return body.data;
   }
 
   /** Like `get`, but a 404 (unknown id) returns null instead of throwing. */
-  async getOrNull<T>(path: string, params: Record<string, string | undefined> = {}): Promise<T | null> {
-    try {
-      return await this.get<T>(path, params);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("404")) return null;
-      throw error;
-    }
+  getOrNull<T>(path: string, params: QueryParams = {}): Promise<T | null> {
+    return nullOn404(this.get<T>(path, params));
   }
 }

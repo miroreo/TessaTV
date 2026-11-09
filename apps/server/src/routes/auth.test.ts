@@ -102,7 +102,8 @@ describe("auth routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().user).toMatchObject({ username: "tessa", isAdmin: true });
     const setCookie = String(response.headers["set-cookie"]);
-    expect(setCookie).toMatch(/^tessatv_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+$/);
+    expect(setCookie).toMatch(/^tessatv_session=[^;]+;/);
+    expect(setCookie.split("; ").slice(1).sort()).toEqual(["HttpOnly", `Max-Age=${400 * 24 * 60 * 60}`, "Path=/", "SameSite=Lax"]);
 
     const session = await app.inject({
       method: "GET",
@@ -150,7 +151,7 @@ describe("auth routes", () => {
 
     const logout = await app.inject({ method: "POST", url: "/api/auth/logout", headers: { cookie } });
     expect(logout.statusCode).toBe(204);
-    expect(String(logout.headers["set-cookie"])).toContain("Max-Age=0");
+    expect(String(logout.headers["set-cookie"])).toMatch(/^tessatv_session=;.*Expires=Thu, 01 Jan 1970/);
     expect((await app.inject({ method: "GET", url: "/api/library", headers: { cookie } })).statusCode).toBe(401);
   });
 
