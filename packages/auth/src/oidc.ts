@@ -28,12 +28,7 @@ export class OidcClient {
   private configuration(config: OidcClientConfig): Promise<client.Configuration> {
     const key = JSON.stringify([config.issuerUrl, config.clientId, config.clientSecret]);
     if (this.cached?.key !== key) {
-      const issuer = new URL(config.issuerUrl);
-      const configuration = client.discovery(issuer, config.clientId, config.clientSecret, undefined, {
-        timeout: DISCOVERY_TIMEOUT_SECONDS,
-        // A homelab provider on plain HTTP (LAN or Tailscale) is the admin's call to make.
-        ...(issuer.protocol === "http:" ? { execute: [client.allowInsecureRequests] } : {}),
-      });
+      const configuration = discover(new URL(config.issuerUrl), config);
       this.cached = { key, configuration };
       // A failed discovery (provider down, typo) shouldn't stick: the next sign-in retries.
       configuration.catch(() => {
@@ -43,9 +38,12 @@ export class OidcClient {
     return this.cached.configuration;
   }
 
-  /** Checks the issuer is reachable and is an OpenID provider, e.g. when an admin saves settings. */
-  async check(config: OidcClientConfig): Promise<void> {
-    await this.configuration(config);
+  /**
+   * Checks the issuer is reachable and is an OpenID provider, e.g. when an admin saves
+   * settings. Returns the issuer as the provider itself states it, which is what to store.
+   */
+  async check(config: OidcClientConfig): Promise<{ issuer: string }> {
+    return { issuer: (await this.configuration(config)).serverMetadata().issuer };
   }
 
   async start(config: OidcClientConfig): Promise<{ url: URL; pending: PendingOidcSignIn }> {
@@ -81,6 +79,29 @@ export class OidcClient {
       claims = { ...(await client.fetchUserInfo(configuration, tokens.access_token, String(claims.sub))), ...claims };
     }
     return identityFromClaims(claims);
+  }
+}
+
+/**
+ * Discovery requires the issuer to match the provider's own statement exactly, and the
+ * only way people get it wrong is the trailing slash (Authentik's issuers end in one, most
+ * others' don't), so that's retried the other way round before giving up.
+ */
+async function discover(issuer: URL, config: OidcClientConfig): Promise<client.Configuration> {
+  const attempt = (url: URL) =>
+    client.discovery(url, config.clientId, config.clientSecret, undefined, {
+      timeout: DISCOVERY_TIMEOUT_SECONDS,
+      // A homelab provider on plain HTTP (LAN or Tailscale) is the admin's call to make.
+      ...(url.protocol === "http:" ? { execute: [client.allowInsecureRequests] } : {}),
+    });
+  try {
+    return await attempt(issuer);
+  } catch (error) {
+    if (!/issuer/i.test((error as Error).message)) throw error;
+    const toggled = new URL(issuer);
+    toggled.pathname = toggled.pathname.endsWith("/") ? toggled.pathname.slice(0, -1) || "/" : `${toggled.pathname}/`;
+    if (toggled.href === issuer.href) throw error;
+    return attempt(toggled);
   }
 }
 

@@ -90,7 +90,7 @@ export function registerServerSettingsRoutes(server: FastifyInstance, deps: Serv
         if (clientSecret === null) {
           return reply.code(400).send({ error: "missing_client_secret", message: "Enter the client secret from your provider" });
         }
-        const oidc: OidcSettings = {
+        let oidc: OidcSettings = {
           enabled: input.enabled,
           publicUrl: input.publicUrl.replace(/\/+$/, ""),
           issuerUrl: input.issuerUrl,
@@ -103,7 +103,13 @@ export function registerServerSettingsRoutes(server: FastifyInstance, deps: Serv
         // Turning it on with an issuer that doesn't answer would only show up as failed sign-ins.
         if (oidc.enabled) {
           try {
-            await deps.sso.client.check({ issuerUrl: oidc.issuerUrl, clientId: oidc.clientId, clientSecret, redirectUri: redirectUri(oidc.publicUrl) });
+            const { issuer } = await deps.sso.client.check({
+              issuerUrl: oidc.issuerUrl,
+              clientId: oidc.clientId,
+              clientSecret,
+              redirectUri: redirectUri(oidc.publicUrl),
+            });
+            oidc = { ...oidc, issuerUrl: issuer };
           } catch (error) {
             return reply.code(422).send({
               error: "issuer_unreachable",

@@ -163,9 +163,16 @@ describe("single sign-on", () => {
   });
 
   it("signs a new person in, creating their account, and never returns the client secret", async () => {
-    const saved = await configure();
+    // Typed without the trailing slash the provider's issuer has: accepted, and stored as the provider states it.
+    const saved = await configure({ issuerUrl: provider.issuer.url!.replace(/\/$/, "") });
     expect(saved.statusCode).toBe(200);
-    expect(saved.json().oidc).toMatchObject({ enabled: true, publicUrl: PUBLIC_URL, hasClientSecret: true, requiredGroup: null });
+    expect(saved.json().oidc).toMatchObject({
+      enabled: true,
+      publicUrl: PUBLIC_URL,
+      issuerUrl: provider.issuer.url,
+      hasClientSecret: true,
+      requiredGroup: null,
+    });
     expect(JSON.stringify(saved.json())).not.toContain("client-secret");
     expect((await app.inject({ method: "GET", url: "/api/auth/session" })).json().sso).toEqual({ buttonLabel: "Sign in with Authentik" });
 
