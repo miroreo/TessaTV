@@ -14,6 +14,26 @@ export interface HlsOutputOptions {
 
 export const DEFAULT_SEGMENT_SECONDS = 6;
 
+/** The accel's video pipeline for a plan, or null when the video isn't re-encoded. */
+export function videoPipelineFor(plan: HlsPlaybackPlan, accel: HardwareAccel): VideoPipeline | null {
+  const video = plan.video;
+  if (video?.kind !== "transcode") return null;
+  return accel.videoPipeline({
+    source: video.source,
+    codec: video.codec,
+    width: video.width,
+    height: video.height,
+    bitrate: video.bitrate,
+    burnIn: plan.subtitle?.kind === "burn-in",
+  });
+}
+
+/**
+ * From fallback level 2: regenerate missing timestamps, drop corrupt packets and keep
+ * decoding through errors, rather than giving up on a file with one bad patch.
+ */
+const ERROR_TOLERANT_INPUT_ARGS = ["-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err"];
+
 /**
  * Turns a plan + strategy into one ffmpeg invocation writing an HLS playlist into
  * `output.directory`. Pure — the strategy contributes only its `VideoPipeline`.
@@ -22,19 +42,12 @@ export function buildTranscodeArgs(plan: HlsPlaybackPlan, accel: HardwareAccel, 
   const segmentSeconds = output.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS;
   const video = plan.video;
   const burnInIndex = plan.subtitle?.kind === "burn-in" ? plan.subtitle.streamIndex : null;
-  const pipeline: VideoPipeline | null =
-    video?.kind === "transcode"
-      ? accel.videoPipeline({
-          source: video.source,
-          codec: video.codec,
-          width: video.width,
-          height: video.height,
-          bitrate: video.bitrate,
-          burnIn: burnInIndex !== null,
-        })
-      : null;
+  const pipeline = videoPipelineFor(plan, accel);
+  const tolerant = plan.fallbackLevel >= 2;
 
   const args: string[] = ["-hide_banner", "-nostdin", "-loglevel", "error", "-progress", "pipe:1", "-nostats"];
+  // ffmpeg's default gives up once two thirds of decodes fail; never give up instead.
+  if (tolerant) args.push("-max_error_rate", "1", ...ERROR_TOLERANT_INPUT_ARGS);
   if (pipeline) args.push(...pipeline.inputArgs);
   if (output.startTimeSeconds) args.push("-ss", String(output.startTimeSeconds));
   args.push("-i", plan.path);

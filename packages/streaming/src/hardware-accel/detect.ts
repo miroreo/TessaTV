@@ -79,6 +79,7 @@ export async function detectVaapiCapabilities(options: HardwareAccelOptions = {}
   );
   const encode = encodeResults.filter((codec): codec is TranscodeVideoCodec => codec !== null);
   if (encode.length === 0) return null;
+  const deviceName = await vaapiDeviceName(ffmpeg, device, run);
 
   const sampleDirectory = await mkdtemp(join(tmpdir(), "tessatv-vaapi-"));
   try {
@@ -108,11 +109,34 @@ export async function detectVaapiCapabilities(options: HardwareAccelOptions = {}
     );
     return {
       device,
+      deviceName,
       encode,
       decode: decodeResults.filter((entry): entry is VaapiDecodeSupport => entry !== null),
     };
   } finally {
     await rm(sampleDirectory, { recursive: true, force: true });
+  }
+}
+
+/**
+ * libva logs the driver's own description at verbose level, e.g. `VAAPI driver: Mesa Gallium
+ * driver 26.1.8 for AMD Radeon 780M Graphics (radeonsi, ...)`; Mesa's names the GPU after "for".
+ */
+export function parseVaapiDriverName(log: string): string | null {
+  const driver = /VAAPI driver: (.+?)\.?$/m.exec(log)?.[1]?.trim();
+  if (!driver) return null;
+  return / for (.+?) \(/.exec(driver)?.[1] ?? driver;
+}
+
+async function vaapiDeviceName(ffmpeg: string, device: string, run: CommandRunner): Promise<string | null> {
+  try {
+    const { stderr } = await run(ffmpeg, [
+      "-hide_banner", "-v", "verbose", "-init_hw_device", `vaapi=va:${device}`,
+      "-f", "lavfi", "-i", "nullsrc", "-frames:v", "1", "-f", "null", "-",
+    ]);
+    return parseVaapiDriverName(stderr);
+  } catch {
+    return null;
   }
 }
 

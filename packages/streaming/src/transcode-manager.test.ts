@@ -16,6 +16,7 @@ const PLAN: HlsPlaybackPlan = {
   audio: { kind: "copy", streamIndex: 1, codec: "aac" },
   subtitle: null,
   reasons: ["ContainerNotSupported"],
+  fallbackLevel: 0,
 };
 
 function fakeSession(outTimeSeconds = 0, state = "running", fails = false) {
@@ -162,6 +163,18 @@ describe("TranscodeManager", () => {
 
       await transcodes.seek(transcode.id, 500);
       expect(accelsUsed()).toEqual(["vaapi", "none", "none"]);
+      expect(transcodes.inspect(transcode.id)).toMatchObject({
+        accelKind: "none",
+        videoPipeline: { decode: "software", encode: "software" },
+        hardwareError: "Transcode failed before producing a playlist",
+      });
+    });
+
+    it("skips the GPU from fallback level 2", async () => {
+      const transcodes = new TranscodeManager({ directory, accel: gpu, startSession: startSession as unknown as typeof startTranscodeSession });
+      const transcode = await transcodes.begin({ ...TRANSCODE_PLAN, fallbackLevel: 2 });
+      expect(accelsUsed()).toEqual(["none"]);
+      expect(transcode.hardwareError).toBeNull();
     });
 
     it("doesn't retry a remux or a software failure — the CPU would fail the same way", async () => {

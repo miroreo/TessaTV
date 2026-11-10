@@ -37,6 +37,8 @@ export interface VideoPipeline {
  */
 export interface HardwareAccel {
   readonly kind: HardwareAccelKind;
+  /** The GPU (or, for software, CPU) doing the work, for display. */
+  readonly deviceName: string | null;
   videoPipeline(request: VideoEncodeRequest): VideoPipeline;
 }
 

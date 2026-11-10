@@ -36,6 +36,7 @@ const PLAN: HlsPlaybackPlan = {
   audio: { kind: "copy", streamIndex: 1, codec: "aac" },
   subtitle: null,
   reasons: ["ContainerNotSupported"],
+  fallbackLevel: 0,
 };
 
 describe("TranscodeSession", () => {
@@ -75,7 +76,7 @@ describe("TranscodeSession", () => {
   it("refuses direct-play plans", async () => {
     await expect(
       startTranscodeSession(
-        { mode: "direct-play", path: "/x.mp4", subtitle: null, reasons: [] },
+        { mode: "direct-play", path: "/x.mp4", subtitle: null, reasons: [], fallbackLevel: 0 },
         { accel: new SoftwareAccel(), directory: root, spawner },
       ),
     ).rejects.toThrow(/serve the file directly/);

@@ -4,6 +4,7 @@
   import { api, episodeCode, formatTime } from "$lib/api.js";
   import { detectCapabilities } from "$lib/capabilities.js";
   import Icon from "$lib/Icon.svelte";
+  import StreamStats, { type FallbackEvent } from "$lib/StreamStats.svelte";
   import {
     getMaxBitrate,
     getNormalize,
@@ -23,7 +24,7 @@
    * One instance per episode: the watch page keys this on the unit id, so moving to another
    * episode tears the old one down (timers, transcode, audio graph) and starts fresh.
    */
-  let { info }: { info: PlaybackInfoResponse } = $props();
+  let { info, isAdmin = false }: { info: PlaybackInfoResponse; isAdmin?: boolean } = $props();
   const unitId = $derived(info.unit.id);
 
   const QUALITIES: { label: string; value: number | null }[] = [
@@ -38,10 +39,17 @@
   const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
   /** Volume above 1 is boost; the element itself stops at 100%. */
   const MAX_VOLUME = 2;
+  /** Mirrors the server's `MAX_FALLBACK_LEVEL`: the H.264/AAC/720p stream every browser plays. */
+  const MAX_FALLBACK_LEVEL = 3;
+  /** Wanting to play this long without the position moving counts as a stuck stream. */
+  const STALL_MS = 20_000;
+  /** Long enough playing with no decoded picture to call it a silent video decode failure. */
+  const NO_PICTURE_SECONDS = 4;
 
   let container: HTMLDivElement;
-  let video: HTMLVideoElement;
-  let hls: Hls | null = null;
+  // State so the stats panel, which gets it as a prop, sees it once it's bound.
+  let video: HTMLVideoElement = $state.raw()!;
+  let hls = $state.raw<Hls | null>(null);
   let session = $state<PlaybackSession | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
@@ -59,6 +67,21 @@
   let lastReport = 0;
   /** Until the current session actually plays, its position means nothing — reporting it would wipe the saved one. */
   let started = false;
+
+  /**
+   * How far this episode has stepped down to keep playing (see the server's `FallbackLevel`).
+   * It only ever goes up while this player lives: whatever failed would just fail again.
+   */
+  let fallbackLevel = 0;
+  let fallbacks = $state<FallbackEvent[]>([]);
+  /** Set while a step down is starting, so one failure reported several ways steps once. */
+  let fallingBack = false;
+  /** hls.js's own recovery gets one try per stream before we step down. */
+  let mediaRecoveries = 0;
+  let lastMovedAt = 0;
+  let lastMovedTime = -1;
+  let watchdog: ReturnType<typeof setInterval> | undefined;
+  let statsOpen = $state(false);
 
   let audioIndex = $state<number | null>(null);
   let subtitleIndex = $state<number | null>(null);
@@ -103,11 +126,13 @@
     const resumeAt = progress && !progress.completed ? progress.positionSeconds : 0;
     void start(resumeAt);
     window.addEventListener("pagehide", leave);
+    watchdog = setInterval(checkHealth, 1000);
     return () => window.removeEventListener("pagehide", leave);
   });
 
   onDestroy(() => {
     void audioGraph?.context.close();
+    clearInterval(watchdog);
     stopCountdown();
     clearTimeout(hideTimer);
     leave();
@@ -127,6 +152,7 @@
   async function start(startSeconds: number) {
     loading = true;
     error = null;
+    const requestedLevel = fallbackLevel;
     const previous = session;
     session = null;
     if (previous?.transcodeId) void fetch(`/api/transcodes/${previous.transcodeId}`, { method: "DELETE" });
@@ -139,12 +165,64 @@
           startSeconds,
           ...(audioIndex !== null ? { audioStreamIndex: audioIndex } : {}),
           ...(subtitleIndex !== null ? { subtitleStreamIndex: subtitleIndex } : {}),
+          fallbackLevel,
         }),
       });
+      // The server steps down by itself when ffmpeg can't start a level.
+      if (next.fallbackLevel > requestedLevel) {
+        fallbackLevel = next.fallbackLevel;
+        fallbacks = [...fallbacks, { level: next.fallbackLevel, reason: "server couldn't start the stream", atSeconds: startSeconds }];
+        showFlash("Switched to a more compatible stream");
+      }
       attach(next, next.mode === "direct-play" ? startSeconds : 0);
     } catch (cause) {
       error = (cause as Error).message;
       loading = false;
+    } finally {
+      fallingBack = false;
+    }
+  }
+
+  /**
+   * The stream failed in a way a retry at the same level wouldn't fix (the browser can't
+   * decode it, ffmpeg died, it stopped moving): restart from here one level more compatible.
+   * Only once the last level fails too is it an error for the viewer.
+   */
+  function fallBack(reason: string) {
+    if (fallingBack || !session) return;
+    if (fallbackLevel >= MAX_FALLBACK_LEVEL) {
+      error = `Playback failed (${reason})`;
+      loading = false;
+      return;
+    }
+    fallingBack = true;
+    fallbackLevel += 1;
+    const at = position;
+    fallbacks = [...fallbacks, { level: fallbackLevel, reason, atSeconds: at }];
+    console.warn(`TessaTV: stepping down to fallback level ${fallbackLevel}: ${reason}`);
+    showFlash("Switched to a more compatible stream");
+    void start(at);
+  }
+
+  /**
+   * Catches the failures that raise no error: a stream that stops moving while it should be
+   * playing (ffmpeg died mid-file, a segment never arrives), and video that "plays" without
+   * ever producing a picture (a codec the browser claimed but can't actually decode).
+   */
+  function checkHealth() {
+    if (!session || !video || error || loading || fallingBack || countdown !== null) return;
+    const now = Date.now();
+    if (video.currentTime !== lastMovedTime || video.paused || video.ended || document.hidden) {
+      lastMovedTime = video.currentTime;
+      lastMovedAt = now;
+    } else if (now - lastMovedAt > STALL_MS) {
+      fallBack("stream stalled");
+      return;
+    }
+    const frames = video.getVideoPlaybackQuality?.().totalVideoFrames;
+    const playedSeconds = video.played.length ? video.played.end(video.played.length - 1) - video.played.start(0) : 0;
+    if (session.hasVideo && started && playedSeconds > NO_PICTURE_SECONDS && (video.videoWidth === 0 || frames === 0)) {
+      fallBack("no picture decoded");
     }
   }
 
@@ -154,6 +232,8 @@
     hls = null;
     session = next;
     started = false;
+    mediaRecoveries = 0;
+    lastMovedAt = Date.now();
     streamTime = streamSeconds;
     const seekWhenReady = () => {
       // An in-progress transcode looks like a live stream; without this, players jump to its end.
@@ -170,7 +250,20 @@
     } else {
       hls = new Hls({ startPosition: streamSeconds, maxBufferLength: 60 });
       hls.on(Hls.Events.ERROR, (_event, details) => {
-        if (details.fatal) error = `Playback failed (${details.details})`;
+        if (!details.fatal) return;
+        // hls.js's documented recovery for a decode error, before giving up on the stream.
+        if (details.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveries < 2) {
+          if (mediaRecoveries++ === 1) hls?.swapAudioCodec();
+          hls?.recoverMediaError();
+          return;
+        }
+        // The transcode was reaped (e.g. after a long pause): same level, fresh transcode.
+        const status = details.response?.code;
+        if (details.type === Hls.ErrorTypes.NETWORK_ERROR && (status === 404 || status === 410)) {
+          void start(position);
+          return;
+        }
+        fallBack(details.details);
       });
       hls.loadSource(next.url);
       hls.attachMedia(video);
@@ -200,8 +293,14 @@
       attach(next, Math.max(0, clamped - next.startTimeSeconds));
     } catch (cause) {
       // The transcode may have been reaped while paused; start a fresh one.
-      if ((cause as { status?: number }).status === 404) await start(clamped);
-      else error = (cause as Error).message;
+      const status = (cause as { status?: number }).status;
+      if (status === 404) await start(clamped);
+      // ffmpeg couldn't restart there: try that spot one level down.
+      else if (status === 502) {
+        fallbackLevel = Math.min(MAX_FALLBACK_LEVEL, fallbackLevel + 1);
+        fallbacks = [...fallbacks, { level: fallbackLevel, reason: "transcode failed after a seek", atSeconds: clamped }];
+        await start(clamped);
+      } else error = (cause as Error).message;
     }
   }
 
@@ -463,6 +562,7 @@
       "<": () => nudgeRate(-1),
       ">": () => nudgeRate(1),
       N: playNext,
+      ...(isAdmin ? { i: () => (statsOpen = !statsOpen) } : {}),
     };
     for (let digit = 0; digit <= 9; digit++) actions[String(digit)] = () => void seekTo((duration * digit) / 10);
     const action = actions[key];
@@ -516,7 +616,11 @@
     oncanplay={() => (loading = false)}
     onended={onEnded}
     onerror={() => {
-      if (video.error) error = `Playback failed (${video.error.message || `code ${video.error.code}`})`;
+      // Aborted is the page tearing the source down, not a failure.
+      if (!video.error || video.error.code === MediaError.MEDIA_ERR_ABORTED) return;
+      // With hls.js the same failure arrives as an hls.js error, which handles it.
+      if (hls) return;
+      fallBack(video.error.message || `media error ${video.error.code}`);
     }}
   >
     {#if session?.subtitleUrl}
@@ -547,6 +651,22 @@
         <button type="button" class="btn btn-ghost btn-sm" onclick={cancelNext}>Cancel</button>
       </div>
     </div>
+  {/if}
+
+  {#if statsOpen && isAdmin}
+    <StreamStats
+      {unitId}
+      {video}
+      {hls}
+      engine={session?.mode === "direct-play" ? "progressive (direct file)" : hls ? `hls.js ${Hls.version}` : "native HLS"}
+      {session}
+      {position}
+      {volume}
+      {muted}
+      normalizationDb={normalizationGain !== 1 && info.normalization ? info.normalization.gainDb : null}
+      {fallbacks}
+      onclose={() => (statsOpen = false)}
+    />
   {/if}
 
   {#if flash}
@@ -660,12 +780,27 @@
           {/each}
         </select>
       </label>
+      {#if isAdmin}
+        <button
+          type="button"
+          class="btn btn-ghost btn-circle btn-sm"
+          class:text-warning={statsOpen}
+          onclick={() => (statsOpen = !statsOpen)}
+          aria-pressed={statsOpen}
+          aria-label="Stats for nerds"
+          title="Stats for nerds (i)"
+        >
+          <Icon name="stats" />
+        </button>
+      {/if}
       <button type="button" class="btn btn-ghost btn-circle btn-sm" onclick={toggleFullscreen} aria-label="Fullscreen" title="Fullscreen (f)">
         <Icon name={fullscreen ? "exitFullscreen" : "fullscreen"} />
       </button>
     </div>
     {#if session && session.mode !== "direct-play"}
-      <div class="mt-1 text-xs opacity-60" title={session.reasons.join(", ")}>{session.mode === "remux" ? "Remuxing" : "Transcoding"}</div>
+      <div class="mt-1 text-xs opacity-60" title={session.reasons.join(", ")}>
+        {session.mode === "remux" ? "Remuxing" : "Transcoding"}{session.fallbackLevel > 0 ? " · compatibility mode" : ""}
+      </div>
     {/if}
   </div>
 </div>

@@ -2,25 +2,22 @@ import { randomUUID } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
 import type { LibraryFolderRepository, LibraryFolderSummary } from "@tessatv/domain";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { LibraryScanner } from "../library-scanner.js";
+import { requireAdmin } from "../require-admin.js";
 
 export interface LibraryFolderDependencies {
   readonly folders: LibraryFolderRepository;
   readonly scanner: LibraryScanner;
 }
 
-/** Changing what the server reads from disk is an admin's call. */
-async function requireAdmin(request: FastifyRequest, reply: FastifyReply) {
-  if (!request.user?.isAdmin) return reply.code(403).send({ error: "forbidden", message: "Admins only" });
-}
-
 const reachable = (path: string) => readdir(path).then(() => true, () => false);
 
 export function registerLibraryFolderRoutes(server: FastifyInstance, deps: LibraryFolderDependencies): void {
   const app = server.withTypeProvider<ZodTypeProvider>();
+  // Changing what the server reads from disk is an admin's call.
   const admin = { preHandler: requireAdmin };
 
   app.get("/api/library/folders", admin, async (): Promise<LibraryFolderSummary[]> => {

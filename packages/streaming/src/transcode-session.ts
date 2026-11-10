@@ -39,6 +39,7 @@ export class TranscodeSession {
   readonly done: Promise<TranscodeResult>;
 
   private currentState: TranscodeState = "running";
+  private finalResult: TranscodeResult | null = null;
   private latestProgress: TranscodeProgress = { outTimeSeconds: 0, speed: null };
   private readonly progressListeners = new Set<(progress: TranscodeProgress) => void>();
   private stopRequested = false;
@@ -61,7 +62,8 @@ export class TranscodeSession {
       const finish = (state: TranscodeResult["state"], error: string | null) => {
         if (this.currentState !== "running") return;
         this.currentState = state;
-        resolve({ state, error });
+        this.finalResult = { state, error };
+        resolve(this.finalResult);
       };
       this.process.on("error", (error) => finish("failed", error.message));
       this.process.on("exit", (code) => {
@@ -74,6 +76,11 @@ export class TranscodeSession {
 
   get state(): TranscodeState {
     return this.currentState;
+  }
+
+  /** How ffmpeg exited, once it has. */
+  get result(): TranscodeResult | null {
+    return this.finalResult;
   }
 
   get progress(): TranscodeProgress {

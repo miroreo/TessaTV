@@ -15,6 +15,7 @@ const TRANSCODE_PLAN: HlsPlaybackPlan = {
   audio: { kind: "transcode", streamIndex: 2, codec: "aac", channels: 2, bitrate: 192_000 },
   subtitle: null,
   reasons: ["VideoCodecNotSupported"],
+  fallbackLevel: 0,
 };
 
 const REMUX_PLAN: HlsPlaybackPlan = {
@@ -25,6 +26,7 @@ const REMUX_PLAN: HlsPlaybackPlan = {
   audio: { kind: "copy", streamIndex: 1, codec: "aac" },
   subtitle: null,
   reasons: ["ContainerNotSupported"],
+  fallbackLevel: 0,
 };
 
 function valueAfter(args: string[], flag: string): string | undefined {
@@ -112,5 +114,14 @@ describe("buildTranscodeArgs", () => {
     );
     expect(args.filter((_, i) => args[i - 1] === "-map")).toEqual(["[video]", "0:2"]);
     expect(args).not.toContain("-vf");
+  });
+
+  it("tolerates corrupt input from fallback level 2", () => {
+    const normal = buildTranscodeArgs(TRANSCODE_PLAN, new SoftwareAccel(), { directory: "/tmp/s" });
+    expect(normal).not.toContain("-err_detect");
+    const tolerant = buildTranscodeArgs({ ...TRANSCODE_PLAN, fallbackLevel: 2 }, new SoftwareAccel(), { directory: "/tmp/s" });
+    expect(valueAfter(tolerant, "-max_error_rate")).toBe("1");
+    expect(valueAfter(tolerant, "-err_detect")).toBe("ignore_err");
+    expect(tolerant.indexOf("-fflags")).toBeLessThan(tolerant.indexOf("-i"));
   });
 });

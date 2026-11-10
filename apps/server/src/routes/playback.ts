@@ -9,6 +9,7 @@ import {
   type MediaFile,
   type PlaybackInfoResponse,
   type PlaybackSessionResponse,
+  type PlaybackStatsResponse,
   type Unit,
   type WatchProgressRepository,
 } from "@tessatv/domain";
@@ -16,7 +17,9 @@ import { findRoot, listUnitsUnder } from "@tessatv/library";
 import {
   type ClientCapabilities,
   extractWebVtt,
+  type FallbackLevel,
   type ManagedTranscode,
+  MAX_FALLBACK_LEVEL,
   type MediaProbe,
   type PlaybackPlan,
   probeMedia,
@@ -28,6 +31,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { LRUCache } from "lru-cache";
 import { z } from "zod";
+import { requireAdmin } from "../require-admin.js";
 import { type Catalog, unitSummary } from "./catalog.js";
 
 export interface PlaybackDependencies {
@@ -66,8 +70,62 @@ const capabilitiesSchema = z.object({
 }) satisfies z.ZodType<ClientCapabilities>;
 
 const unitParams = z.object({ unitId: z.string() });
+
+/** Every fallback level failed, so there's nothing left to try. */
+class UnplayableError extends Error {}
+
+const where = (side: "hardware" | "software") => (side === "hardware" ? "gpu" : "cpu");
+
+function transcodeStats(transcode: ManagedTranscode): NonNullable<PlaybackStatsResponse["transcode"]> {
+  const { plan, session, videoPipeline } = transcode;
+  const result = session.result;
+  return {
+    mode: plan.mode,
+    fallbackLevel: plan.fallbackLevel,
+    reasons: plan.reasons,
+    segmentContainer: plan.segmentContainer,
+    video: !plan.video
+      ? null
+      : plan.video.kind === "copy"
+        ? { action: "copy", codec: plan.video.codec, width: null, height: null, bitrate: null }
+        : {
+            action: "transcode",
+            codec: plan.video.codec,
+            width: plan.video.width,
+            height: plan.video.height,
+            bitrate: plan.video.bitrate,
+          },
+    audio: !plan.audio
+      ? null
+      : plan.audio.kind === "copy"
+        ? { action: "copy", codec: plan.audio.codec, channels: null, bitrate: null }
+        : { action: "transcode", codec: plan.audio.codec, channels: plan.audio.channels, bitrate: plan.audio.bitrate },
+    subtitle: plan.subtitle?.kind ?? null,
+    encoder: videoPipeline
+      ? {
+          decode: where(videoPipeline.decode),
+          decodeDevice: videoPipeline.decodeDevice,
+          encode: where(videoPipeline.encode),
+          encodeDevice: videoPipeline.encodeDevice,
+          accel: transcode.accelKind,
+        }
+      : null,
+    hardwareError: transcode.hardwareError,
+    state: session.state,
+    error: result?.error ?? null,
+    speed: session.progress.speed,
+    transcodedUntilSeconds: transcode.startTimeSeconds + session.progress.outTimeSeconds,
+    startTimeSeconds: transcode.startTimeSeconds,
+  };
+}
 const streamIndex = z.number().int().nonnegative().optional();
 const seconds = z.number().nonnegative();
+const fallbackLevel = z
+  .number()
+  .int()
+  .min(0)
+  .max(MAX_FALLBACK_LEVEL)
+  .transform((level) => level as FallbackLevel);
 
 /** Only what ffmpeg's HLS muxer writes — never a path. */
 const HLS_FILE = /^[\w-]+\.(m3u8|m4s|ts|mp4)$/;
@@ -124,7 +182,57 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       startTimeSeconds: transcode.startTimeSeconds,
       subtitleUrl: subtitleUrl(unitId, transcode.plan),
       reasons: transcode.plan.reasons,
+      fallbackLevel: transcode.plan.fallbackLevel,
+      hasVideo: transcode.plan.video !== null,
     };
+  }
+
+  /**
+   * Starts the stream at `level`, stepping down a level each time a plan can't be made or
+   * ffmpeg fails to produce a first segment, so a start only fails when even the most
+   * compatible stream does. Being at capacity isn't the stream's fault, so that's not retried.
+   */
+  async function startStream(
+    unitId: string,
+    media: MediaProbe,
+    capabilities: ClientCapabilities,
+    options: { startSeconds: number; audioStreamIndex?: number; subtitleStreamIndex?: number },
+    level: FallbackLevel,
+  ): Promise<PlaybackSessionResponse> {
+    let lastError: Error | null = null;
+    for (let current = level; current <= MAX_FALLBACK_LEVEL; current = (current + 1) as FallbackLevel) {
+      let plan: PlaybackPlan;
+      try {
+        plan = resolvePlaybackPlan(media, capabilities, {
+          ...(options.audioStreamIndex !== undefined ? { audioStreamIndex: options.audioStreamIndex } : {}),
+          ...(options.subtitleStreamIndex !== undefined ? { subtitleStreamIndex: options.subtitleStreamIndex } : {}),
+          fallbackLevel: current,
+        });
+      } catch (error) {
+        lastError = error as Error;
+        continue;
+      }
+      if (plan.mode === "direct-play") {
+        return {
+          mode: plan.mode,
+          url: `/api/playback/${unitId}/file`,
+          transcodeId: null,
+          startTimeSeconds: 0,
+          subtitleUrl: subtitleUrl(unitId, plan),
+          reasons: plan.reasons,
+          fallbackLevel: plan.fallbackLevel,
+          hasVideo: media.videoStreams.length > 0,
+        };
+      }
+      try {
+        return hlsResponse(unitId, await transcodes.begin(plan, options.startSeconds));
+      } catch (error) {
+        if (error instanceof TranscodeCapacityError) throw error;
+        lastError = error as Error;
+        app.log.warn({ path: media.path, fallbackLevel: current, error: lastError.message }, "stream failed to start; stepping down");
+      }
+    }
+    throw new UnplayableError(lastError?.message ?? "No playable stream");
   }
 
   function streamLabel(stream: { index: number; language: string | null; title: string | null; codec: string }) {
@@ -181,6 +289,7 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
           startSeconds: seconds.optional(),
           audioStreamIndex: streamIndex,
           subtitleStreamIndex: streamIndex,
+          fallbackLevel: fallbackLevel.optional(),
         }),
       },
     },
@@ -190,32 +299,21 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       if (!playable) return reply.code(404).send({ error: "not_found" });
       const media = await probeOr404(playable.file, reply);
       if (!media) return reply;
-
-      let plan: PlaybackPlan;
       try {
-        plan = resolvePlaybackPlan(media, capabilities, {
-          ...(audioStreamIndex !== undefined ? { audioStreamIndex } : {}),
-          ...(subtitleStreamIndex !== undefined ? { subtitleStreamIndex } : {}),
-        });
-      } catch (error) {
-        return reply.code(400).send({ error: "unplayable", message: (error as Error).message });
-      }
-
-      if (plan.mode === "direct-play") {
-        const response: PlaybackSessionResponse = {
-          mode: plan.mode,
-          url: `/api/playback/${playable.unit.id}/file`,
-          transcodeId: null,
-          startTimeSeconds: 0,
-          subtitleUrl: subtitleUrl(playable.unit.id, plan),
-          reasons: plan.reasons,
-        };
-        return response;
-      }
-      try {
-        return hlsResponse(playable.unit.id, await transcodes.begin(plan, startSeconds ?? 0));
+        return await startStream(
+          playable.unit.id,
+          media,
+          capabilities,
+          {
+            startSeconds: startSeconds ?? 0,
+            ...(audioStreamIndex !== undefined ? { audioStreamIndex } : {}),
+            ...(subtitleStreamIndex !== undefined ? { subtitleStreamIndex } : {}),
+          },
+          request.body.fallbackLevel ?? 0,
+        );
       } catch (error) {
         if (error instanceof TranscodeCapacityError) return reply.code(503).send({ error: "busy", message: error.message });
+        if (error instanceof UnplayableError) return reply.code(422).send({ error: "unplayable", message: error.message });
         throw error;
       }
     },
@@ -226,9 +324,58 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
     "/api/playback/:unitId/seek",
     { schema: { params: unitParams, body: z.object({ transcodeId: z.string(), seconds }) } },
     async (request, reply) => {
-      const transcode = await transcodes.seek(request.body.transcodeId, request.body.seconds);
+      let transcode: ManagedTranscode | null;
+      try {
+        transcode = await transcodes.seek(request.body.transcodeId, request.body.seconds);
+      } catch (error) {
+        // The client answers this by starting over a fallback level down.
+        app.log.warn({ error: (error as Error).message }, "transcode failed to restart after a seek");
+        return reply.code(502).send({ error: "transcode_failed", message: (error as Error).message });
+      }
       if (!transcode) return reply.code(404).send({ error: "not_found" });
       return hlsResponse(request.params.unitId, transcode);
+    },
+  );
+
+  app.get(
+    "/api/playback/:unitId/stats",
+    {
+      preHandler: requireAdmin,
+      schema: { params: unitParams, querystring: z.object({ transcodeId: z.string().optional() }) },
+    },
+    async (request, reply) => {
+      const playable = await loadPlayable(request.params.unitId);
+      if (!playable) return reply.code(404).send({ error: "not_found" });
+      const media = await probeOr404(playable.file, reply);
+      if (!media) return reply;
+      const transcode = request.query.transcodeId ? transcodes.inspect(request.query.transcodeId) : null;
+      const sourceVideo = transcode?.plan.video?.kind === "transcode" ? transcode.plan.video.source : media.videoStreams[0];
+      const audioIndex = transcode?.plan.audio?.streamIndex;
+      const sourceAudio = media.audioStreams.find((stream) => stream.index === audioIndex) ?? media.audioStreams[0];
+      const response: PlaybackStatsResponse = {
+        file: { path: media.path, container: media.container, sizeBytes: media.sizeBytes, bitRate: media.bitRate },
+        sourceVideo: sourceVideo
+          ? {
+              codec: sourceVideo.codec,
+              profile: sourceVideo.profile,
+              width: sourceVideo.width,
+              height: sourceVideo.height,
+              bitDepth: sourceVideo.bitDepth,
+              frameRate: sourceVideo.frameRate,
+              isHdr: sourceVideo.isHdr,
+            }
+          : null,
+        sourceAudio: sourceAudio
+          ? {
+              codec: sourceAudio.codec,
+              channels: sourceAudio.channels,
+              sampleRate: sourceAudio.sampleRate,
+              language: sourceAudio.language,
+            }
+          : null,
+        transcode: transcode ? transcodeStats(transcode) : null,
+      };
+      return response;
     },
   );
 

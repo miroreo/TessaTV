@@ -144,15 +144,23 @@ describe("browse, playback and progress routes", () => {
       [unit("e2", "l2", [1, 2]), unit("e1", "l1", [1, 1]), { ...unit("film", "movie", []), mediaType: "movie" }],
       files,
     );
-    const fakeSession = (directory: string) =>
+    const fakeSession = (directory: string, fails = false) =>
       ({ id: `session-${Math.random()}`, outputDirectory: directory, state: "running", progress: { outTimeSeconds: 0, speed: 1 },
-        waitForPlaylist: async () => join(directory, "index.m3u8"), dispose: async () => {} }) as unknown as TranscodeSession;
+        result: null,
+        waitForPlaylist: async () => {
+          if (fails) throw new Error("Transcode failed before producing a playlist: Invalid data found");
+          return join(directory, "index.m3u8");
+        },
+        dispose: async () => {} }) as unknown as TranscodeSession;
     const transcodes = new TranscodeManager({
       directory: transcodeDir(),
       accel: new SoftwareAccel(),
-      startSession: async (_plan, options) => {
+      // The fake sessions never finish, so each test's transcodes stay "running".
+      maxConcurrent: 10,
+      startSession: async (plan, options) => {
         await writeFile(join(root, "playlist.m3u8"), "#EXTM3U\n");
-        return fakeSession(options.directory);
+        // e2 stands in for a damaged file: only the error-tolerant levels get through it.
+        return fakeSession(options.directory, plan.path.endsWith("e2.mkv") && plan.fallbackLevel < 2);
       },
     });
     const auth = new AuthService(new InMemoryUsers(), new InMemorySessions());
@@ -207,6 +215,46 @@ describe("browse, playback and progress routes", () => {
     const vtt = await app.inject({ method: "GET", url: body.subtitleUrl, headers });
     expect(vtt.headers["content-type"]).toMatch(/^text\/vtt/);
     expect(vtt.body).toContain("00:01:40.000 --> 00:01:45.000");
+  });
+
+  it("steps down fallback levels until a stream starts, and starts at a level the client asks for", async () => {
+    const started = await app.inject({ method: "POST", url: "/api/playback/e2/start", headers, payload: { capabilities: CAPABILITIES } });
+    expect(started.statusCode).toBe(200);
+    expect(started.json()).toMatchObject({ mode: "transcode", fallbackLevel: 2, hasVideo: true });
+
+    // A client that couldn't decode the direct-play file asks for level 1.
+    const fallback = await app.inject({
+      method: "POST",
+      url: "/api/playback/film/start",
+      headers,
+      payload: { capabilities: CAPABILITIES, fallbackLevel: 1 },
+    });
+    expect(fallback.json()).toMatchObject({ mode: "transcode", fallbackLevel: 1 });
+    const outOfRange = { capabilities: CAPABILITIES, fallbackLevel: 4 };
+    expect((await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: outOfRange })).statusCode).toBe(400);
+  });
+
+  it("gives admins the server's side of stream stats, including what's encoding on what", async () => {
+    const { transcodeId } = (
+      await app.inject({ method: "POST", url: "/api/playback/e2/start", headers, payload: { capabilities: CAPABILITIES } })
+    ).json();
+    const stats = await app.inject({ method: "GET", url: `/api/playback/e2/stats?transcodeId=${transcodeId}`, headers });
+    expect(stats.statusCode).toBe(200);
+    expect(stats.json()).toMatchObject({
+      file: { container: "mkv", bitRate: 2_000_000 },
+      sourceVideo: { codec: "h264", width: 1280, height: 720 },
+      sourceAudio: { codec: "aac", channels: 2 },
+      transcode: {
+        mode: "transcode",
+        fallbackLevel: 2,
+        video: { action: "transcode", codec: "h264" },
+        encoder: { decode: "cpu", encode: "cpu", accel: "none", encodeDevice: expect.any(String) },
+        state: "running",
+        speed: 1,
+      },
+    });
+    const directPlay = (await app.inject({ method: "GET", url: "/api/playback/film/stats", headers })).json();
+    expect(directPlay.transcode).toBeNull();
   });
 
   it("rejects missing capabilities and refuses to serve arbitrary transcode files", async () => {

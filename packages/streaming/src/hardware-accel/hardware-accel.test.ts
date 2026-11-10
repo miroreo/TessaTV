@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CommandRunner } from "../process.js";
 import { videoStream } from "../test-fixtures.js";
-import { detectVaapiCapabilities, selectHardwareAccel } from "./detect.js";
+import { detectVaapiCapabilities, parseVaapiDriverName, selectHardwareAccel } from "./detect.js";
 import type { VideoEncodeRequest } from "./hardware-accel.js";
 import { SoftwareAccel } from "./software.js";
 import { VaapiAccel, type VaapiCapabilities } from "./vaapi.js";
@@ -75,6 +75,23 @@ describe("VaapiAccel", () => {
   });
 });
 
+describe("parseVaapiDriverName", () => {
+  it("takes the GPU name out of the driver's description", () => {
+    const mesa =
+      "[VAAPI @ 0x5] VAAPI driver: Mesa Gallium driver 26.1.8 for AMD Radeon 780M Graphics (radeonsi, phoenix, ACO, DRM 3.64, 7.2.9).";
+    expect(parseVaapiDriverName(`[VAAPI @ 0x5] Initialised VAAPI connection: version 1.24\n${mesa}\n`)).toBe(
+      "AMD Radeon 780M Graphics",
+    );
+    expect(parseVaapiDriverName("[VAAPI @ 0x5] VAAPI driver: Intel iHD driver for Intel(R) Gen Graphics - 24.1.0 ()")).toBe(
+      "Intel(R) Gen Graphics - 24.1.0",
+    );
+    expect(parseVaapiDriverName("[VAAPI @ 0x5] VAAPI driver: Splitted-Desktop Systems VDPAU backend")).toBe(
+      "Splitted-Desktop Systems VDPAU backend",
+    );
+    expect(parseVaapiDriverName("nothing useful")).toBeNull();
+  });
+});
+
 describe("detectVaapiCapabilities", () => {
   /** Fakes a GPU that can encode `encoders` and decode samples whose path ends in one of `decodableSamples`. */
   function fakeGpu(encoders: string[], decodableSamples: string[]): CommandRunner {
@@ -98,6 +115,7 @@ describe("detectVaapiCapabilities", () => {
     });
     expect(capabilities).toEqual({
       device: "/dev/dri/renderD129",
+      deviceName: null,
       encode: ["h264", "hevc"],
       decode: [
         { codec: "h264", bitDepth: 8 },

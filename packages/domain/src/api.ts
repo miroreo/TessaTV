@@ -136,6 +136,67 @@ export interface PlaybackSessionResponse {
   /** WebVTT on the source's timeline. */
   readonly subtitleUrl: string | null;
   readonly reasons: readonly string[];
+  /**
+   * How far the stream has stepped down to stay playable (0 = as planned, 3 = the most
+   * compatible). The server may answer a start with a higher level than asked when the
+   * requested one failed to transcode.
+   */
+  readonly fallbackLevel: number;
+  /** Whether the stream carries a picture, so a client can tell a silent decode failure. */
+  readonly hasVideo: boolean;
+}
+
+/** `GET /api/playback/:unitId/stats` (admins only): the server's side of "stats for nerds". */
+export interface PlaybackStatsResponse {
+  readonly file: {
+    readonly path: string;
+    readonly container: string;
+    readonly sizeBytes: number | null;
+    readonly bitRate: number | null;
+  };
+  readonly sourceVideo: {
+    readonly codec: string;
+    readonly profile: string | null;
+    readonly width: number;
+    readonly height: number;
+    readonly bitDepth: number;
+    readonly frameRate: number | null;
+    readonly isHdr: boolean;
+  } | null;
+  readonly sourceAudio: {
+    readonly codec: string;
+    readonly channels: number;
+    readonly sampleRate: number | null;
+    readonly language: string | null;
+  } | null;
+  /** Null for direct play, or once the transcode has been reaped. */
+  readonly transcode: {
+    readonly mode: "remux" | "transcode";
+    readonly fallbackLevel: number;
+    readonly reasons: readonly string[];
+    readonly segmentContainer: string;
+    readonly video: { readonly action: "copy" | "transcode"; readonly codec: string; readonly width: number | null; readonly height: number | null; readonly bitrate: number | null } | null;
+    readonly audio: { readonly action: "copy" | "transcode"; readonly codec: string; readonly channels: number | null; readonly bitrate: number | null } | null;
+    readonly subtitle: "sidecar" | "burn-in" | null;
+    /** Where video is decoded and encoded, and on what device; null when video is copied. */
+    readonly encoder: {
+      readonly decode: "gpu" | "cpu";
+      readonly decodeDevice: string | null;
+      readonly encode: "gpu" | "cpu";
+      readonly encodeDevice: string | null;
+      /** `vaapi`, or `none` for software. */
+      readonly accel: string;
+    } | null;
+    /** Why the GPU failed, when this transcode fell back to the CPU. */
+    readonly hardwareError: string | null;
+    readonly state: "running" | "completed" | "failed" | "stopped";
+    readonly error: string | null;
+    /** Encode speed relative to realtime. */
+    readonly speed: number | null;
+    /** Source position the transcode has reached. */
+    readonly transcodedUntilSeconds: number;
+    readonly startTimeSeconds: number;
+  } | null;
 }
 
 /** `GET /api/library/folders` */

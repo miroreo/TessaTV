@@ -53,6 +53,19 @@ export type SubtitleAction =
   | { readonly kind: "sidecar"; readonly streamIndex: number; readonly format: "webvtt" }
   | { readonly kind: "burn-in"; readonly streamIndex: number };
 
+/**
+ * How far playback has stepped down after the stream failed, whether ffmpeg failed or the
+ * client couldn't decode what it got. Each level gives up something the one before kept,
+ * ending at a stream every browser plays:
+ * - 0: the best plan for the client's capabilities.
+ * - 1: everything re-encoded to H.264 + stereo AAC in MPEG-TS segments; no direct play or
+ *   stream copy, which is where a codec detail the capability check can't see bites.
+ * - 2: also CPU-only, and ffmpeg pushes through corrupt input instead of failing.
+ * - 3: also at most 720p, and without burned-in subtitles (the most fragile filter graph).
+ */
+export type FallbackLevel = 0 | 1 | 2 | 3;
+export const MAX_FALLBACK_LEVEL: FallbackLevel = 3;
+
 export type PlaybackPlan =
   | {
       /** Serve the file untouched; no ffmpeg involved. */
@@ -60,6 +73,7 @@ export type PlaybackPlan =
       readonly path: string;
       readonly subtitle: Extract<SubtitleAction, { kind: "sidecar" }> | null;
       readonly reasons: readonly TranscodeReason[];
+      readonly fallbackLevel: FallbackLevel;
     }
   | {
       /** `remux` copies the video stream into HLS; `transcode` re-encodes it. */
@@ -71,6 +85,7 @@ export type PlaybackPlan =
       readonly subtitle: SubtitleAction | null;
       /** Why direct play wasn't possible. */
       readonly reasons: readonly TranscodeReason[];
+      readonly fallbackLevel: FallbackLevel;
     };
 
 export type HlsPlaybackPlan = Extract<PlaybackPlan, { mode: "remux" | "transcode" }>;
@@ -83,6 +98,23 @@ export interface PlaybackOptions {
   /** Forces an HLS transcode even when direct play would work (e.g. client-requested). */
   readonly forceTranscode?: boolean;
   readonly maxHeight?: number;
+  /** See `FallbackLevel`; defaults to 0. */
+  readonly fallbackLevel?: FallbackLevel;
+}
+
+const FALLBACK_MAX_HEIGHT = 720;
+
+/** H.264 8-bit + stereo AAC in MPEG-TS: what every HLS player has supported since the start. */
+function fallbackCapabilities(capabilities: ClientCapabilities): ClientCapabilities {
+  const h264 = capabilities.videoCodecs.find((entry) => entry.codec === "h264");
+  return {
+    directPlayContainers: [],
+    videoCodecs: [{ ...h264, codec: "h264", maxBitDepth: 8 }],
+    audioCodecs: [{ codec: "aac", maxChannels: 2 }],
+    ...(capabilities.maxBitrate !== undefined ? { maxBitrate: capabilities.maxBitrate } : {}),
+    supportsHdr: false,
+    hls: { segmentContainers: ["mpegts"], videoCodecs: ["h264"], audioCodecs: ["aac"], maxAudioChannels: 2 },
+  };
 }
 
 const SEGMENT_VIDEO_CODECS: Record<HlsSegmentContainer, ReadonlySet<string>> = {
@@ -168,16 +200,26 @@ function videoBitrateFor(height: number, sourceBitrate: number, budget: number):
  */
 export function resolvePlaybackPlan(
   probe: MediaProbe,
-  capabilities: ClientCapabilities,
-  options: PlaybackOptions = {},
+  requestedCapabilities: ClientCapabilities,
+  requestedOptions: PlaybackOptions = {},
 ): PlaybackPlan {
+  const fallbackLevel = requestedOptions.fallbackLevel ?? 0;
+  const capabilities = fallbackLevel >= 1 ? fallbackCapabilities(requestedCapabilities) : requestedCapabilities;
+  const options: PlaybackOptions =
+    fallbackLevel >= 1
+      ? {
+          ...requestedOptions,
+          forceTranscode: true,
+          maxHeight: Math.min(requestedOptions.maxHeight ?? Infinity, fallbackLevel >= 3 ? FALLBACK_MAX_HEIGHT : Infinity),
+        }
+      : requestedOptions;
   const video = pickPreferred(probe.videoStreams);
   const audio = pickPreferred(probe.audioStreams, options.audioStreamIndex);
   if (!video && !audio) throw new Error(`${probe.path} has no playable audio or video streams`);
 
   const subtitleStream =
     options.subtitleStreamIndex !== undefined ? pickPreferred(probe.subtitleStreams, options.subtitleStreamIndex) : null;
-  const burnIn = video !== null && subtitleStream !== null && !subtitleStream.isTextBased;
+  const burnIn = video !== null && subtitleStream !== null && !subtitleStream.isTextBased && fallbackLevel < 3;
   const subtitle: SubtitleAction | null = !subtitleStream
     ? null
     : subtitleStream.isTextBased
@@ -202,7 +244,7 @@ export function resolvePlaybackPlan(
 
   if (reasons.length === 0 && !options.forceTranscode) {
     const sidecar = subtitle?.kind === "sidecar" ? subtitle : null;
-    return { mode: "direct-play", path: probe.path, subtitle: sidecar, reasons };
+    return { mode: "direct-play", path: probe.path, subtitle: sidecar, reasons, fallbackLevel };
   }
 
   const canCopyVideo =
@@ -212,8 +254,11 @@ export function resolvePlaybackPlan(
   if (canCopyVideo && !copyVideo) reasons.push("VideoCodecNotSupportedInSegmentContainer");
 
   const copyAudio =
-    audio !== null && audioReasons.length === 0 && SEGMENT_AUDIO_CODECS[segmentContainer.container].has(audio.codec);
-  if (audio && audioReasons.length === 0 && !copyAudio) reasons.push("AudioCodecNotSupportedInSegmentContainer");
+    audio !== null &&
+    audioReasons.length === 0 &&
+    fallbackLevel === 0 &&
+    SEGMENT_AUDIO_CODECS[segmentContainer.container].has(audio.codec);
+  if (audio && audioReasons.length === 0 && !copyAudio && fallbackLevel === 0) reasons.push("AudioCodecNotSupportedInSegmentContainer");
 
   const audioAction: AudioAction | null = !audio
     ? null
@@ -259,6 +304,7 @@ export function resolvePlaybackPlan(
     audio: audioAction,
     subtitle,
     reasons,
+    fallbackLevel,
   };
 }
 

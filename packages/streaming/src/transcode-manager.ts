@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { HardwareAccel } from "./hardware-accel/hardware-accel.js";
-import { SoftwareAccel } from "./hardware-accel/software.js";
+import { videoPipelineFor } from "./ffmpeg-args.js";
+import type { HardwareAccel, HardwareAccelKind, VideoPipeline } from "./hardware-accel/hardware-accel.js";
+import { cpuModel, SoftwareAccel } from "./hardware-accel/software.js";
 import type { HlsPlaybackPlan } from "./playback-plan.js";
 import { startTranscodeSession, type TranscodeSession } from "./transcode-session.js";
 
@@ -21,6 +22,14 @@ export interface ManagedTranscode {
   readonly session: TranscodeSession;
   /** Where in the source the current session's output begins. */
   readonly startTimeSeconds: number;
+  /** The strategy actually encoding, after any fallback to the CPU. */
+  readonly accelKind: HardwareAccelKind;
+  /** Where video is decoded and encoded, and on what; null when the video is copied. */
+  readonly videoPipeline:
+    | (Pick<VideoPipeline, "decode" | "encode"> & { readonly decodeDevice: string | null; readonly encodeDevice: string | null })
+    | null;
+  /** Why the hardware path failed, when this transcode fell back to the CPU. */
+  readonly hardwareError: string | null;
 }
 
 export interface TranscodeManagerOptions {
@@ -53,6 +62,29 @@ interface Entry {
   startTimeSeconds: number;
   lastAccessMs: number;
   generation: number;
+  hardwareError: string | null;
+}
+
+/** The read-only view handed out; `accel` stays internal. */
+function view(entry: Entry): ManagedTranscode {
+  const pipeline = videoPipelineFor(entry.plan, entry.accel);
+  const device = (where: "hardware" | "software") => (where === "hardware" ? entry.accel.deviceName : cpuModel());
+  return {
+    id: entry.id,
+    plan: entry.plan,
+    session: entry.session,
+    startTimeSeconds: entry.startTimeSeconds,
+    accelKind: entry.accel.kind,
+    videoPipeline: pipeline
+      ? {
+          decode: pipeline.decode,
+          encode: pipeline.encode,
+          decodeDevice: device(pipeline.decode),
+          encodeDevice: device(pipeline.encode),
+        }
+      : null,
+    hardwareError: entry.hardwareError,
+  };
 }
 
 const SESSION_DIRECTORY_PREFIX = "session-";
@@ -94,10 +126,27 @@ export class TranscodeManager {
     await this.reapIdle();
     this.assertCapacity();
     const id = randomUUID();
-    const { session, accel } = await this.launch(id, 0, plan, startTimeSeconds, this.options.accel);
-    const entry: Entry = { id, plan, startTimeSeconds, session, accel, lastAccessMs: this.now(), generation: 0 };
+    // From fallback level 2 the GPU is skipped outright: the previous levels may have failed on it.
+    const initial = plan.fallbackLevel >= 2 ? (this.fallback ?? this.options.accel) : this.options.accel;
+    const { session, accel, hardwareError } = await this.launch(id, 0, plan, startTimeSeconds, initial);
+    const entry: Entry = {
+      id,
+      plan,
+      startTimeSeconds,
+      session,
+      accel,
+      lastAccessMs: this.now(),
+      generation: 0,
+      hardwareError,
+    };
     this.entries.set(id, entry);
-    return entry;
+    return view(entry);
+  }
+
+  /** Looks up a transcode without counting as use, e.g. for a stats display. */
+  inspect(id: string): ManagedTranscode | null {
+    const entry = this.entries.get(id);
+    return entry ? view(entry) : null;
   }
 
   /** Looks up a transcode and marks it in use; every segment request should go through this. */
@@ -105,7 +154,7 @@ export class TranscodeManager {
     const entry = this.entries.get(id);
     if (!entry) return null;
     entry.lastAccessMs = this.now();
-    return entry;
+    return view(entry);
   }
 
   /** Keeps the session if `seconds` is already transcoded; otherwise restarts ffmpeg there. */
@@ -114,15 +163,16 @@ export class TranscodeManager {
     if (!entry) return null;
     entry.lastAccessMs = this.now();
     const transcodedUntil = entry.startTimeSeconds + entry.session.progress.outTimeSeconds;
-    if (seconds >= entry.startTimeSeconds && seconds <= transcodedUntil) return entry;
+    if (seconds >= entry.startTimeSeconds && seconds <= transcodedUntil) return view(entry);
 
     await entry.session.dispose();
     entry.generation += 1;
-    const { session, accel } = await this.launch(id, entry.generation, entry.plan, seconds, entry.accel);
+    const { session, accel, hardwareError } = await this.launch(id, entry.generation, entry.plan, seconds, entry.accel);
     entry.session = session;
     entry.accel = accel;
     entry.startTimeSeconds = seconds;
-    return entry;
+    entry.hardwareError = hardwareError ?? entry.hardwareError;
+    return view(entry);
   }
 
   async end(id: string): Promise<void> {
@@ -151,6 +201,10 @@ export class TranscodeManager {
     if (running >= this.maxConcurrent) throw new TranscodeCapacityError(this.maxConcurrent);
   }
 
+  private get fallback(): HardwareAccel | null {
+    return this.options.fallbackAccel === undefined ? new SoftwareAccel() : this.options.fallbackAccel;
+  }
+
   private sessionDirectory(id: string): string {
     return join(this.options.directory, `${SESSION_DIRECTORY_PREFIX}${id}`);
   }
@@ -166,12 +220,12 @@ export class TranscodeManager {
     plan: HlsPlaybackPlan,
     startTimeSeconds: number,
     accel: HardwareAccel,
-  ): Promise<{ session: TranscodeSession; accel: HardwareAccel }> {
-    const fallback = this.options.fallbackAccel === undefined ? new SoftwareAccel() : this.options.fallbackAccel;
+  ): Promise<{ session: TranscodeSession; accel: HardwareAccel; hardwareError: string | null }> {
+    const fallback = this.fallback;
     const session = await this.spawn(id, generation, plan, startTimeSeconds, accel);
     try {
       await session.waitForPlaylist(this.options.playlistTimeoutMs ?? 60_000);
-      return { session, accel };
+      return { session, accel, hardwareError: null };
     } catch (error) {
       await session.dispose();
       // Only a video re-encode uses the accel; a remux failing on the CPU would fail again.
@@ -184,7 +238,7 @@ export class TranscodeManager {
         await retry.dispose();
         throw retryError;
       }
-      return { session: retry, accel: fallback };
+      return { session: retry, accel: fallback, hardwareError: (error as Error).message };
     }
   }
 

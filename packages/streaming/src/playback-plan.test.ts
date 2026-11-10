@@ -14,6 +14,7 @@ describe("resolvePlaybackPlan", () => {
       path: "/media/file.mp4",
       subtitle: null,
       reasons: [],
+      fallbackLevel: 0,
     });
   });
 
@@ -188,5 +189,37 @@ describe("resolvePlaybackPlan", () => {
     const capabilities = iosLikeCapabilities({ hls: { ...iosLikeCapabilities().hls, videoCodecs: ["hevc"], segmentContainers: ["mpegts"] } });
     const probe = mediaProbe({ videoStreams: [videoStream({ codec: "mpeg4" })] });
     expect(() => resolvePlaybackPlan(probe, capabilities)).toThrow(/no transcode video codec/);
+  });
+
+  describe("fallback levels", () => {
+    const hevcMkv = mediaProbe({
+      container: "mkv",
+      videoStreams: [videoStream({ codec: "hevc", profile: "Main 10", bitDepth: 10, width: 3840, height: 2160 })],
+      audioStreams: [audioStream({ codec: "eac3", channels: 6 })],
+    });
+
+    it("level 1 re-encodes everything to H.264 + stereo AAC in MPEG-TS, even what would direct play", () => {
+      const plan = hlsPlan(resolvePlaybackPlan(mediaProbe(), iosLikeCapabilities(), { fallbackLevel: 1 }));
+      expect(plan).toMatchObject({
+        mode: "transcode",
+        segmentContainer: "mpegts",
+        video: { kind: "transcode", codec: "h264" },
+        audio: { kind: "transcode", codec: "aac", channels: 2 },
+        fallbackLevel: 1,
+      });
+      expect(hlsPlan(resolvePlaybackPlan(hevcMkv, iosLikeCapabilities(), { fallbackLevel: 1 }))).toMatchObject({
+        video: { kind: "transcode", codec: "h264", height: 2160 },
+        audio: { kind: "transcode", codec: "aac", channels: 2 },
+      });
+    });
+
+    it("level 3 caps at 720p and drops burned-in subtitles", () => {
+      const image = { index: 4, codec: "hdmv_pgs_subtitle", language: "eng", title: null, isDefault: false, isForced: false, isTextBased: false };
+      const probe = { ...hevcMkv, subtitleStreams: [image] };
+      const plan = hlsPlan(resolvePlaybackPlan(probe, iosLikeCapabilities(), { fallbackLevel: 3, subtitleStreamIndex: 4 }));
+      expect(plan.video).toMatchObject({ kind: "transcode", width: 1280, height: 720 });
+      expect(plan.subtitle).toBeNull();
+      expect(plan.reasons).not.toContain("SubtitleBurnInRequired");
+    });
   });
 });

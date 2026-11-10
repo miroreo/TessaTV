@@ -10,6 +10,8 @@ export interface VaapiDecodeSupport {
 export interface VaapiCapabilities {
   /** DRM render node, e.g. `/dev/dri/renderD128`. */
   readonly device: string;
+  /** What the driver calls the GPU (e.g. `AMD Radeon 780M Graphics`), when it says. */
+  readonly deviceName?: string | null;
   readonly encode: readonly TranscodeVideoCodec[];
   readonly decode: readonly VaapiDecodeSupport[];
 }
@@ -27,6 +29,10 @@ const ENCODERS: Record<TranscodeVideoCodec, readonly string[]> = {
  */
 export class VaapiAccel implements HardwareAccel {
   readonly kind = "vaapi";
+
+  get deviceName(): string | null {
+    return this.capabilities.deviceName ?? null;
+  }
 
   constructor(
     readonly capabilities: VaapiCapabilities,

@@ -11,5 +11,5 @@
   transcode) under the new episode's data.
 -->
 {#key data.info.unit.id}
-  <Player info={data.info} />
+  <Player info={data.info} isAdmin={data.session.user?.isAdmin ?? false} />
 {/key}
