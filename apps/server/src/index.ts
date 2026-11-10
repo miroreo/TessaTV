@@ -2,6 +2,7 @@ import { AuthService, OidcClient, SecretBox } from "@tessatv/auth";
 import { loadConfig } from "@tessatv/config";
 import { type MetadataProvidersByKind, refreshLibraryMetadata } from "@tessatv/library";
 import { deriveServerId } from "@tessatv/jellyfin-compat";
+import { JellyfinSdkSource } from "@tessatv/jellyfin-import";
 import { JobScheduler } from "@tessatv/jobs";
 import { CachedMetadataProvider, TmdbClient, TmdbMetadataProvider, TvdbClient, TvdbMetadataProvider } from "@tessatv/metadata";
 import {
@@ -73,6 +74,7 @@ const scanner = new LibraryScanner({
   onError: (error) => app.log.error(error, "library scan failed"),
 });
 
+const watchProgress = new DrizzleWatchProgressRepository(db);
 const webUiHandler = await loadWebUiHandler();
 
 const app = buildApp({
@@ -80,7 +82,7 @@ const app = buildApp({
   libraryRepository,
   metadataProviders,
   playback: {
-    progressRepository: new DrizzleWatchProgressRepository(db),
+    progressRepository: watchProgress,
     metadataCache: metadataCacheRepository,
     transcodes,
     loudnessRepository,
@@ -94,6 +96,19 @@ const app = buildApp({
     client: new OidcClient(),
     clientSecrets: new SecretBox(config.APP_SECRET, "oidc-client-secret"),
     pendingSignIns: new SecretBox(config.APP_SECRET, "oidc-pending-sign-in"),
+    // History imported from Jellyfin for this username before they had an account.
+    onAccountCreated: async (user) => {
+      const moved = await watchProgress.claimHeldHistory(user.username, user.id);
+      if (moved > 0) app.log.info({ username: user.username, moved }, "applied held Jellyfin watch history");
+    },
+  },
+  jellyfinImport: {
+    settings: serverSettings,
+    library: libraryRepository,
+    users,
+    progress: watchProgress,
+    apiKeys: new SecretBox(config.APP_SECRET, "jellyfin-api-key"),
+    sourceFor: (url, apiKey) => new JellyfinSdkSource(url, apiKey),
   },
   jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },
   ...(webUiHandler ? { webUiHandler } : {}),

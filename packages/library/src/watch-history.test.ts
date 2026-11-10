@@ -32,6 +32,9 @@ class InMemoryLibraryRepository implements LibraryRepository {
   async updateUnit(unit: Unit) {
     this.units.set(unit.id, unit);
   }
+  async listUnitLocations() {
+    return [];
+  }
   async moveWatchProgress() {}
   async getMediaFile(): Promise<MediaFile | null> {
     return null;
@@ -63,6 +66,11 @@ class InMemoryProgress implements WatchProgressRepository {
     this.rows = this.rows.map((row) =>
       row.userId === userId && unitIds.includes(row.unitId) ? { ...row, positionSeconds: 0, completed: false, watchedAt: null } : row,
     );
+  }
+  async importHistory() {}
+  async holdHistory() {}
+  async claimHeldHistory() {
+    return 0;
   }
   async forgetPosition(userId: string, unitId: string) {
     this.rows = this.rows.map((row) =>

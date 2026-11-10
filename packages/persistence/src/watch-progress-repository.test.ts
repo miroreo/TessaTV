@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ImportedWatchProgress } from "@tessatv/domain";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDatabase, type Database } from "./db.js";
@@ -126,5 +127,38 @@ describe("DrizzleWatchProgressRepository", () => {
     expect(await progress.get(userId, unitIds[1])).toMatchObject({ positionSeconds: 0, completed: false, updatedAt: new Date(6_000) });
     // Forgetting where you were doesn't forget that you watched it.
     expect(await progress.get(userId, unitIds[0])).toMatchObject({ positionSeconds: 0, completed: false, watchedAt: new Date(5_000) });
+  });
+});
+
+describe("importing history from another server", () => {
+  const entry = (unitId: string, over: Partial<ImportedWatchProgress> = {}): ImportedWatchProgress => ({
+    unitId, positionSeconds: 10, durationSeconds: 100, completed: false, watchedAt: null, updatedAt: new Date(1_000), ...over,
+  });
+
+  it("takes only newer records, and never un-watches", async () => {
+    const { userId, unitIds } = await fixture();
+    await progress.importHistory(userId, [entry(unitIds[0], { positionSeconds: 50, updatedAt: new Date(5_000) })]);
+    // Older than what's stored: ignored.
+    await progress.importHistory(userId, [entry(unitIds[0], { positionSeconds: 5, updatedAt: new Date(2_000) })]);
+    expect(await progress.get(userId, unitIds[0])).toMatchObject({ positionSeconds: 50, updatedAt: new Date(5_000) });
+    // Newer, and finished: replaces the position; watched sticks even if a later import says otherwise.
+    await progress.importHistory(userId, [entry(unitIds[0], { positionSeconds: 100, completed: true, watchedAt: new Date(6_000), updatedAt: new Date(6_000) })]);
+    await progress.importHistory(userId, [entry(unitIds[0], { positionSeconds: 1, updatedAt: new Date(1_000) })]);
+    expect(await progress.get(userId, unitIds[0])).toMatchObject({ positionSeconds: 100, completed: true, watchedAt: new Date(6_000) });
+  });
+
+  it("holds history by username and hands it over on claim", async () => {
+    const { userId, unitIds } = await fixture();
+    const name = `Held-${userId}`;
+    await progress.holdHistory(name, [entry(unitIds[0], { positionSeconds: 70, updatedAt: new Date(3_000) })]);
+    await progress.holdHistory(name.toUpperCase(), [entry(unitIds[0], { positionSeconds: 20, updatedAt: new Date(2_000) }), entry(unitIds[1], { completed: true, watchedAt: new Date(4_000), updatedAt: new Date(4_000) })]);
+    // They already watched part of the first one here, more recently than the held record.
+    await progress.save({ userId, unitId: unitIds[0], positionSeconds: 90, durationSeconds: 100, completed: false, watchedAt: null, updatedAt: new Date(9_000) });
+
+    expect(await progress.claimHeldHistory(name.toLowerCase(), userId)).toBe(2);
+    expect(await progress.get(userId, unitIds[0])).toMatchObject({ positionSeconds: 90 });
+    expect(await progress.get(userId, unitIds[1])).toMatchObject({ completed: true, watchedAt: new Date(4_000) });
+    // Claimed once: nothing left.
+    expect(await progress.claimHeldHistory(name, userId)).toBe(0);
   });
 });

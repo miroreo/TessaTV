@@ -88,6 +88,11 @@ class InMemoryProgress implements WatchProgressRepository {
       row.userId === userId && unitIds.includes(row.unitId) ? { ...row, positionSeconds: 0, completed: false, watchedAt: null } : row,
     );
   }
+  async importHistory() {}
+  async holdHistory() {}
+  async claimHeldHistory() {
+    return 0;
+  }
   async forgetPosition(userId: string, unitId: string) {
     this.rows = this.rows.map((row) =>
       row.userId === userId && row.unitId === unitId ? { ...row, positionSeconds: 0, completed: false } : row,
@@ -112,7 +117,7 @@ class InMemoryProgress implements WatchProgressRepository {
 }
 
 class InMemorySettings implements ServerSettingsRepository {
-  settings: ServerSettings = { maxStreamHeight: null, oidc: null };
+  settings: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null };
   async get() {
     return this.settings;
   }
@@ -155,6 +160,9 @@ class Library implements LibraryRepository {
   }
   async createUnit() {}
   async updateUnit() {}
+  async listUnitLocations() {
+    return [];
+  }
   async moveWatchProgress() {}
   async getMediaFile(id: string) {
     return this.files.find((entry) => entry.id === id) ?? null;
@@ -313,7 +321,7 @@ describe("browse, playback and progress routes", () => {
 
   it("caps every stream at the admin's maximum resolution, transcoding a file that would direct play", async () => {
     const patched = await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: 480 } });
-    expect(patched.json()).toEqual({ maxStreamHeight: 480, oidc: null });
+    expect(patched.json()).toEqual({ maxStreamHeight: 480, oidc: null, jellyfin: null });
     try {
       const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
       expect(started.json()).toMatchObject({ mode: "transcode", reasons: ["VideoResolutionNotSupported"] });
@@ -324,7 +332,7 @@ describe("browse, playback and progress routes", () => {
     } finally {
       await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: null } });
     }
-    expect((await app.inject({ method: "GET", url: "/api/settings", headers })).json()).toEqual({ maxStreamHeight: null, oidc: null });
+    expect((await app.inject({ method: "GET", url: "/api/settings", headers })).json()).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null });
     expect((await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: 999 } })).statusCode).toBe(400);
     const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
     expect(started.json()).toMatchObject({ mode: "direct-play" });

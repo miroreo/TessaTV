@@ -1,4 +1,5 @@
 import type { OidcClient, SecretBox } from "@tessatv/auth";
+import type { JellyfinHistorySource } from "@tessatv/jellyfin-import";
 import {
   MAX_STREAM_HEIGHTS,
   type OidcSettings,
@@ -19,6 +20,8 @@ export interface ServerSettingsDependencies {
   readonly users?: UserRepository;
   /** Needed to save single sign-on settings. */
   readonly sso?: { readonly client: OidcClient; readonly clientSecrets: SecretBox };
+  /** Needed to save the Jellyfin import settings. */
+  readonly jellyfin?: { readonly apiKeys: SecretBox; readonly sourceFor: (url: string, apiKey: string) => JellyfinHistorySource };
 }
 
 const maxStreamHeight = z.union([z.null(), ...MAX_STREAM_HEIGHTS.map((height) => z.literal(height))] as const);
@@ -44,6 +47,8 @@ const oidcInput = z.object({
   buttonLabel: z.string().trim().min(1).max(60),
 });
 
+const jellyfinInput = z.object({ url: httpUrl, apiKey: z.string().trim().min(1).optional() });
+
 /** Never sends a secret back, sealed or not: only whether one is set. */
 function publicView(settings: ServerSettings): ServerSettingsResponse {
   const { oidc } = settings;
@@ -61,6 +66,7 @@ function publicView(settings: ServerSettings): ServerSettingsResponse {
           buttonLabel: oidc.buttonLabel,
         }
       : null,
+    jellyfin: settings.jellyfin ? { url: settings.jellyfin.url, hasApiKey: settings.jellyfin.apiKeySealed !== "" } : null,
   };
 }
 
@@ -76,10 +82,10 @@ export function registerServerSettingsRoutes(server: FastifyInstance, deps: Serv
     "/api/settings",
     {
       ...admin,
-      schema: { body: z.object({ maxStreamHeight: maxStreamHeight.optional(), oidc: oidcInput.optional() }).strict() },
+      schema: { body: z.object({ maxStreamHeight: maxStreamHeight.optional(), oidc: oidcInput.optional(), jellyfin: jellyfinInput.optional() }).strict() },
     },
     async (request, reply) => {
-      const { maxStreamHeight: height, oidc: input } = request.body;
+      const { maxStreamHeight: height, oidc: input, jellyfin: jellyfinChange } = request.body;
       const changes: { -readonly [K in keyof ServerSettings]?: ServerSettings[K] } = {};
       if (height !== undefined) changes.maxStreamHeight = height;
       if (input) {
@@ -118,6 +124,23 @@ export function registerServerSettingsRoutes(server: FastifyInstance, deps: Serv
           }
         }
         changes.oidc = oidc;
+      }
+      if (jellyfinChange) {
+        if (!deps.jellyfin) return reply.code(503).send({ error: "jellyfin_unavailable", message: "Jellyfin import isn't available on this server" });
+        const saved = (await settings.get()).jellyfin;
+        const url = jellyfinChange.url.replace(/\/+$/, "");
+        const apiKeySealed = jellyfinChange.apiKey ? deps.jellyfin.apiKeys.seal(jellyfinChange.apiKey) : (saved?.apiKeySealed ?? "");
+        const apiKey = deps.jellyfin.apiKeys.open(apiKeySealed);
+        if (apiKey === null) return reply.code(400).send({ error: "missing_api_key", message: "Enter an API key from the Jellyfin dashboard" });
+        try {
+          await deps.jellyfin.sourceFor(url, apiKey).listUsers();
+        } catch (error) {
+          return reply.code(422).send({
+            error: "jellyfin_unreachable",
+            message: `Couldn't read users from ${url} with that API key: ${(error as Error).message}`,
+          });
+        }
+        changes.jellyfin = { url, apiKeySealed };
       }
       return publicView(await settings.update(changes));
     },

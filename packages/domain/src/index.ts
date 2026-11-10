@@ -10,6 +10,7 @@ export * from "./grab.js";
 export * from "./user.js";
 export * from "./api.js";
 export * from "./watch-progress.js";
+export * from "./watch-history-import.js";
 export * from "./loudness.js";
 export * from "./library-folder.js";
 export * from "./server-settings.js";

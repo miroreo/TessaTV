@@ -1,6 +1,7 @@
 import type { LibraryNode } from "../library-node.js";
 import type { MediaFile } from "../media-file.js";
 import type { Unit } from "../unit.js";
+import type { UnitLocation } from "../watch-history-import.js";
 
 /**
  * Port that `persistence` implements against Postgres/Drizzle. Everything else (library,
@@ -27,6 +28,9 @@ export interface LibraryRepository {
    * more recently updated position wins and the unit stays watched if either was.
    */
   moveWatchProgress(fromUnitId: string, toUnitId: string): Promise<void>;
+
+  /** Every unit that has a file, with what another server's records can be matched on. */
+  listUnitLocations(): Promise<UnitLocation[]>;
 
   getMediaFile(id: string): Promise<MediaFile | null>;
   createMediaFile(file: MediaFile): Promise<void>;

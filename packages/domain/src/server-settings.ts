@@ -23,6 +23,14 @@ export interface OidcSettings {
   readonly buttonLabel: string;
 }
 
+/** A Jellyfin server to import watch history from (Settings page). */
+export interface JellyfinImportSettings {
+  /** e.g. `http://jellyfin.lan:8096` */
+  readonly url: string;
+  /** A Jellyfin API key (Dashboard → API Keys), sealed like the OIDC client secret. */
+  readonly apiKeySealed: string;
+}
+
 /** Server-wide settings an admin changes on the settings page. */
 export interface ServerSettings {
   /**
@@ -32,6 +40,8 @@ export interface ServerSettings {
   readonly maxStreamHeight: MaxStreamHeight | null;
   /** Null until an admin sets up single sign-on. */
   readonly oidc: OidcSettings | null;
+  /** Null until an admin points TessaTV at a Jellyfin server. */
+  readonly jellyfin: JellyfinImportSettings | null;
 }
 
-export const DEFAULT_SERVER_SETTINGS: ServerSettings = { maxStreamHeight: null, oidc: null };
+export const DEFAULT_SERVER_SETTINGS: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null };

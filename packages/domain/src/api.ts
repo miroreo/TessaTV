@@ -244,6 +244,24 @@ export interface ServerSettingsResponse {
     readonly requiredGroup: string | null;
     readonly buttonLabel: string;
   } | null;
+  readonly jellyfin: { readonly url: string; readonly hasApiKey: boolean } | null;
+}
+
+/** `PATCH /api/settings`'s `jellyfin`. Omitting `apiKey` keeps the saved one. */
+export interface JellyfinImportSettingsInput {
+  readonly url: string;
+  readonly apiKey?: string;
+}
+
+/** `POST /api/jellyfin/import` (admins only): what happened for each Jellyfin user. */
+export interface JellyfinImportResponse {
+  readonly users: readonly {
+    readonly username: string;
+    /** "imported": into their account; "held": no account yet, applied on their first sign-in. */
+    readonly outcome: "imported" | "held";
+    readonly matched: number;
+    readonly unmatched: number;
+  }[];
 }
 
 /** `PATCH /api/settings`'s `oidc`. Omitting `clientSecret` keeps the saved one. */

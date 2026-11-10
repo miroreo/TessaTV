@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    // The Jellyfin SDK ships ESM whose type declarations omit file extensions, which NodeNext
+    // can't resolve. Emitted code still uses explicit .js extensions, so it runs on Node as is.
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../domain" }]
+}

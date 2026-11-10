@@ -1,9 +1,9 @@
-import type { LibraryNode, LibraryRepository, MediaFile, Unit } from "@tessatv/domain";
+import type { ExternalId, LibraryNode, LibraryRepository, MediaFile, Unit, UnitLocation } from "@tessatv/domain";
 import { eq, isNull, sql } from "drizzle-orm";
 import type { Database } from "./db.js";
 import { loadExternalIds, replaceExternalIds } from "./external-id-store.js";
 import { toDomainLibraryNode, toDomainMediaFile, toDomainUnit } from "./mappers.js";
-import { libraryNode as libraryNodeTable, mediaFile as mediaFileTable, unit as unitTable, watchProgress } from "./schema.js";
+import { externalId as externalIdTable, libraryNode as libraryNodeTable, mediaFile as mediaFileTable, unit as unitTable, watchProgress } from "./schema.js";
 
 export class DrizzleLibraryRepository implements LibraryRepository {
   constructor(private readonly db: Database) {}
@@ -104,6 +104,32 @@ export class DrizzleLibraryRepository implements LibraryRepository {
       })
       .where(eq(unitTable.id, unitValue.id));
     await replaceExternalIds(this.db, "unit", unitValue.id, unitValue.externalIds);
+  }
+
+  async listUnitLocations(): Promise<UnitLocation[]> {
+    const rows = await this.db
+      .select({ unitId: unitTable.id, nodeId: unitTable.libraryNodeId, mediaType: unitTable.mediaType, sequencePath: unitTable.sequencePath, path: mediaFileTable.path })
+      .from(unitTable)
+      .innerJoin(mediaFileTable, eq(mediaFileTable.id, unitTable.mediaFileId));
+    const nodes = await this.db.select({ id: libraryNodeTable.id, parentId: libraryNodeTable.parentId }).from(libraryNodeTable);
+    const parentOf = new Map(nodes.map((node) => [node.id, node.parentId]));
+    const ids = await this.db.select().from(externalIdTable);
+    const idsByEntity = new Map<string, ExternalId[]>();
+    for (const row of ids) {
+      const key = `${row.entityType}:${row.entityId}`;
+      idsByEntity.set(key, [
+        ...(idsByEntity.get(key) ?? []),
+        { provider: row.provider, entityType: row.entityType as ExternalId["entityType"], entityId: row.entityId, providerId: row.providerId },
+      ]);
+    }
+    return rows.map((row) => {
+      const externalIds = [...(idsByEntity.get(`unit:${row.unitId}`) ?? [])];
+      // The unit's node, and every ancestor (a series' id reaches its episodes).
+      for (let node: string | null | undefined = row.nodeId; node; node = parentOf.get(node)) {
+        externalIds.push(...(idsByEntity.get(`library_node:${node}`) ?? []));
+      }
+      return { unitId: row.unitId, mediaType: row.mediaType, path: row.path, sequencePath: row.sequencePath, externalIds };
+    });
   }
 
   async moveWatchProgress(fromUnitId: string, toUnitId: string): Promise<void> {

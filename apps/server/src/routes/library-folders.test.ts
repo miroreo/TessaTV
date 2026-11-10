@@ -98,6 +98,9 @@ class Library implements LibraryRepository {
     this.units.push(unit);
   }
   async updateUnit() {}
+  async listUnitLocations() {
+    return [];
+  }
   async moveWatchProgress() {}
   async getMediaFile(): Promise<MediaFile | null> {
     return null;

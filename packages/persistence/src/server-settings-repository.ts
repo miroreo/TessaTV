@@ -1,6 +1,7 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   MAX_STREAM_HEIGHTS,
+  type JellyfinImportSettings,
   type OidcSettings,
   type ServerSettings,
   type ServerSettingsRepository,
@@ -14,7 +15,14 @@ const PARSERS: { [K in keyof ServerSettings]: (value: unknown) => ServerSettings
   maxStreamHeight: (value) =>
     value === null ? null : MAX_STREAM_HEIGHTS.find((height) => height === value),
   oidc: (value) => (value === null ? null : parseOidc(value)),
+  jellyfin: (value) => (value === null ? null : parseJellyfin(value)),
 };
+
+function parseJellyfin(value: unknown): JellyfinImportSettings | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { url, apiKeySealed } = value as Record<string, unknown>;
+  return typeof url === "string" && typeof apiKeySealed === "string" ? { url, apiKeySealed } : undefined;
+}
 
 function parseOidc(value: unknown): OidcSettings | undefined {
   if (typeof value !== "object" || value === null) return undefined;

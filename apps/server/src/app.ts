@@ -23,6 +23,7 @@ import { registerLibraryMergeRoutes } from "./routes/library-merge.js";
 import { registerLibraryMetadataRoutes } from "./routes/library-metadata.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerPlaybackRoutes, type PlaybackDependencies } from "./routes/playback.js";
+import { type JellyfinImportDependencies, registerJellyfinImportRoutes } from "./routes/jellyfin-import.js";
 import { registerOidcRoutes } from "./routes/oidc.js";
 import { registerServerSettingsRoutes } from "./routes/server-settings.js";
 import { oidcClientConfig, type SsoDependencies } from "./sso.js";
@@ -56,6 +57,8 @@ export interface AppDependencies {
   users?: UserRepository;
   /** Single sign-on; mounted with `auth`, configured in `settings`. */
   sso?: SsoDependencies;
+  /** Import watch history from a Jellyfin server; admin-only routes, mounted with `auth` and `settings`. */
+  jellyfinImport?: JellyfinImportDependencies;
   /** Library folder settings and scanning; admin-only routes, mounted together with `auth`. */
   libraryFolders?: LibraryFolderDependencies;
   /** SvelteKit's built handler, served at the root for any path no explicit route claims. Omitted when the web app isn't built. */
@@ -112,7 +115,9 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
       settings: deps.settings,
       ...(deps.users ? { users: deps.users } : {}),
       ...(deps.sso ? { sso: { client: deps.sso.client, clientSecrets: deps.sso.clientSecrets } } : {}),
+      ...(deps.jellyfinImport ? { jellyfin: { apiKeys: deps.jellyfinImport.apiKeys, sourceFor: deps.jellyfinImport.sourceFor } } : {}),
     });
+    if (deps.jellyfinImport) registerJellyfinImportRoutes(app, deps.jellyfinImport);
   }
 
   if (deps.jellyfin) registerJellyfinCompat(app, deps.jellyfin);

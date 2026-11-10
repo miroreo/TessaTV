@@ -28,6 +28,9 @@ class InMemoryLibraryRepository implements LibraryRepository {
     }
     this.nodes.delete(id);
   }
+  async listUnitLocations() {
+    return [];
+  }
   async moveWatchProgress(fromUnitId: string, toUnitId: string) {
     if (this.watched.delete(fromUnitId)) this.watched.add(toUnitId);
   }

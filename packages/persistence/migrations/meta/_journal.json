@@ -99,6 +99,13 @@
       "when": 1794345288061,
       "tag": "0013_sso_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794351271422,
+      "tag": "0014_held_watch_history",
+      "breakpoints": true
     }
   ]
 }

@@ -17,6 +17,7 @@
     "@tessatv/config": "workspace:*",
     "@tessatv/domain": "workspace:*",
     "@tessatv/jellyfin-compat": "workspace:*",
+    "@tessatv/jellyfin-import": "workspace:*",
     "@tessatv/jobs": "workspace:*",
     "@tessatv/library": "workspace:*",
     "@tessatv/metadata": "workspace:*",

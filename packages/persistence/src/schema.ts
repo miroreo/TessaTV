@@ -169,6 +169,26 @@ export const watchProgress = pgTable(
 );
 
 /** One loudness measurement per media file — see `LoudnessMeasurement`. */
+/**
+ * Watch history imported from another server for someone with no account here yet, kept
+ * by username until they first sign in (then it moves into `watch_progress`).
+ */
+export const heldWatchHistory = pgTable(
+  "held_watch_history",
+  {
+    usernameLower: text("username_lower").notNull(),
+    unitId: uuid("unit_id")
+      .notNull()
+      .references(() => unit.id, { onDelete: "cascade" }),
+    positionSeconds: doublePrecision("position_seconds").notNull(),
+    durationSeconds: doublePrecision("duration_seconds"),
+    completed: boolean("completed").notNull().default(false),
+    watchedAt: timestamp("watched_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.usernameLower, table.unitId] })],
+);
+
 export const audioLoudness = pgTable("audio_loudness", {
   mediaFileId: uuid("media_file_id")
     .primaryKey()
