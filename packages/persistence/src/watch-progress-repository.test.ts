@@ -109,4 +109,22 @@ describe("DrizzleWatchProgressRepository", () => {
     expect(await progress.get(userId, unitIds[0])).toBeNull();
     expect(await progress.get(other, unitIds[0])).toBeNull();
   });
+
+  it("marks watched (in order, at the end where known), unwatched, and forgets a position", async () => {
+    const { userId, unitIds } = await fixture();
+    await progress.save({ userId, unitId: unitIds[0], positionSeconds: 40, durationSeconds: 100, completed: false, watchedAt: null, updatedAt: new Date(1_000) });
+    await progress.markWatched(userId, unitIds, new Date(5_000));
+    expect(await progress.get(userId, unitIds[0])).toMatchObject({ positionSeconds: 100, completed: true, watchedAt: new Date(5_000), updatedAt: new Date(5_000) });
+    expect(await progress.get(userId, unitIds[1])).toMatchObject({ positionSeconds: 0, completed: true, watchedAt: new Date(5_001), updatedAt: new Date(5_001) });
+
+    await progress.markUnwatched(userId, [unitIds[1]]);
+    expect(await progress.get(userId, unitIds[1])).toMatchObject({ positionSeconds: 0, completed: false, watchedAt: null, updatedAt: new Date(5_001) });
+
+    await progress.save({ userId, unitId: unitIds[1], positionSeconds: 50, durationSeconds: 100, completed: false, watchedAt: null, updatedAt: new Date(6_000) });
+    await progress.forgetPosition(userId, unitIds[1]);
+    await progress.forgetPosition(userId, unitIds[0]);
+    expect(await progress.get(userId, unitIds[1])).toMatchObject({ positionSeconds: 0, completed: false, updatedAt: new Date(6_000) });
+    // Forgetting where you were doesn't forget that you watched it.
+    expect(await progress.get(userId, unitIds[0])).toMatchObject({ positionSeconds: 0, completed: false, watchedAt: new Date(5_000) });
+  });
 });

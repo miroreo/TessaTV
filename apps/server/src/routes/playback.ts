@@ -430,6 +430,27 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
     return reply.code(204).send();
   });
 
+  /** Marks episodes or movies watched or unwatched by hand, e.g. a whole season at once, in viewing order. */
+  app.post(
+    "/api/progress/watched",
+    { schema: { body: z.object({ unitIds: z.array(z.string()).min(1).max(1000), watched: z.boolean() }) } },
+    async (request, reply) => {
+      const { unitIds, watched } = request.body;
+      const units = await Promise.all(unitIds.map((id) => libraryRepository.getUnit(id)));
+      if (units.some((entry) => entry === null)) return reply.code(404).send({ error: "not_found" });
+      if (watched) await progressRepository.markWatched(request.user!.id, unitIds, new Date());
+      else await progressRepository.markUnwatched(request.user!.id, unitIds);
+      return reply.code(204).send();
+    },
+  );
+
+  /** Discards a saved position: the next play starts from the beginning. */
+  app.delete("/api/progress/:unitId/position", { schema: { params: unitParams } }, async (request, reply) => {
+    if (!(await libraryRepository.getUnit(request.params.unitId))) return reply.code(404).send({ error: "not_found" });
+    await progressRepository.forgetPosition(request.user!.id, request.params.unitId);
+    return reply.code(204).send();
+  });
+
   app.post(
     "/api/progress/:unitId",
     {

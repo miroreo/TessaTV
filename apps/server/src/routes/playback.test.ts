@@ -64,6 +64,35 @@ class InMemorySessions implements AuthSessionRepository {
 }
 
 class InMemoryProgress implements WatchProgressRepository {
+  async markWatched(userId: string, unitIds: readonly string[], at: Date) {
+    unitIds.forEach((unitId, order) => {
+      const when = new Date(at.getTime() + order);
+      const existing = this.rows.find((row) => row.userId === userId && row.unitId === unitId);
+      const watchedAt = existing?.watchedAt && existing.watchedAt > when ? existing.watchedAt : when;
+      this.rows = [
+        ...this.rows.filter((row) => !(row.userId === userId && row.unitId === unitId)),
+        {
+          userId,
+          unitId,
+          positionSeconds: existing?.durationSeconds ?? existing?.positionSeconds ?? 0,
+          durationSeconds: existing?.durationSeconds ?? null,
+          completed: true,
+          watchedAt,
+          updatedAt: when,
+        },
+      ];
+    });
+  }
+  async markUnwatched(userId: string, unitIds: readonly string[]) {
+    this.rows = this.rows.map((row) =>
+      row.userId === userId && unitIds.includes(row.unitId) ? { ...row, positionSeconds: 0, completed: false, watchedAt: null } : row,
+    );
+  }
+  async forgetPosition(userId: string, unitId: string) {
+    this.rows = this.rows.map((row) =>
+      row.userId === userId && row.unitId === unitId ? { ...row, positionSeconds: 0, completed: false } : row,
+    );
+  }
   rows: WatchProgress[] = [];
   async get(userId: string, unitId: string) {
     return this.rows.find((row) => row.userId === userId && row.unitId === unitId) ?? null;
@@ -299,6 +328,30 @@ describe("browse, playback and progress routes", () => {
     expect((await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: 999 } })).statusCode).toBe(400);
     const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
     expect(started.json()).toMatchObject({ mode: "direct-play" });
+  });
+
+  it("marks episodes watched and unwatched by hand, and forgets a saved position", async () => {
+    const watch = (unitIds: string[], watched: boolean) =>
+      app.inject({ method: "POST", url: "/api/progress/watched", headers, payload: { unitIds, watched } });
+    const episode = async (id: string) =>
+      (await app.inject({ method: "GET", url: "/api/browse/title/show", headers })).json().units.find((entry: { id: string }) => entry.id === id);
+
+    expect((await watch(["e1", "e2"], true)).statusCode).toBe(204);
+    expect((await episode("e2")).progress).toMatchObject({ completed: true, watched: true });
+    // Marking the season watched moves "play" past it: nothing after e2.
+    expect((await app.inject({ method: "GET", url: "/api/browse/title/show", headers })).json().next).toBeNull();
+
+    expect((await watch(["e2"], false)).statusCode).toBe(204);
+    expect((await episode("e2")).progress).toMatchObject({ completed: false, watched: false, positionSeconds: 0 });
+    expect((await episode("e1")).progress).toMatchObject({ watched: true });
+
+    await app.inject({ method: "POST", url: "/api/progress/e2", headers, payload: { positionSeconds: 600, durationSeconds: 1000 } });
+    expect((await app.inject({ method: "GET", url: "/api/browse/home", headers })).json().continueWatching.map((entry: { unit: { id: string } }) => entry.unit.id)).toContain("e2");
+    expect((await app.inject({ method: "DELETE", url: "/api/progress/e2/position", headers })).statusCode).toBe(204);
+    expect((await episode("e2")).progress).toMatchObject({ positionSeconds: 0, completed: false });
+    expect((await app.inject({ method: "GET", url: "/api/browse/home", headers })).json().continueWatching.map((entry: { unit: { id: string } }) => entry.unit.id)).not.toContain("e2");
+
+    expect((await watch(["nope"], true)).statusCode).toBe(404);
   });
 
   it("rejects missing capabilities and refuses to serve arbitrary transcode files", async () => {

@@ -43,6 +43,42 @@ export class DrizzleWatchProgressRepository implements WatchProgressRepository {
       });
   }
 
+  async markWatched(userId: string, unitIds: readonly string[], at: Date): Promise<void> {
+    if (unitIds.length === 0) return;
+    const rows = unitIds.map((unitId, order) => {
+      const when = new Date(at.getTime() + order);
+      return { userId, unitId, positionSeconds: 0, durationSeconds: null, completed: true, watchedAt: when, updatedAt: when };
+    });
+    await this.db
+      .insert(watchProgress)
+      .values(rows)
+      .onConflictDoUpdate({
+        target: [watchProgress.userId, watchProgress.unitId],
+        set: {
+          // At the end, where it's known.
+          positionSeconds: sql`coalesce(${watchProgress.durationSeconds}, ${watchProgress.positionSeconds})`,
+          completed: true,
+          watchedAt: sql`greatest(${watchProgress.watchedAt}, excluded.watched_at)`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
+  }
+
+  async markUnwatched(userId: string, unitIds: readonly string[]): Promise<void> {
+    if (unitIds.length === 0) return;
+    await this.db
+      .update(watchProgress)
+      .set({ positionSeconds: 0, completed: false, watchedAt: null })
+      .where(and(eq(watchProgress.userId, userId), inArray(watchProgress.unitId, [...unitIds])));
+  }
+
+  async forgetPosition(userId: string, unitId: string): Promise<void> {
+    await this.db
+      .update(watchProgress)
+      .set({ positionSeconds: 0, completed: false })
+      .where(and(eq(watchProgress.userId, userId), eq(watchProgress.unitId, unitId)));
+  }
+
   async listRecent(userId: string, limit: number): Promise<WatchProgress[]> {
     const rows = await this.db
       .select()

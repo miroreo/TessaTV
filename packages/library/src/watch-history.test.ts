@@ -40,6 +40,35 @@ class InMemoryLibraryRepository implements LibraryRepository {
 }
 
 class InMemoryProgress implements WatchProgressRepository {
+  async markWatched(userId: string, unitIds: readonly string[], at: Date) {
+    unitIds.forEach((unitId, order) => {
+      const when = new Date(at.getTime() + order);
+      const existing = this.rows.find((row) => row.userId === userId && row.unitId === unitId);
+      const watchedAt = existing?.watchedAt && existing.watchedAt > when ? existing.watchedAt : when;
+      this.rows = [
+        ...this.rows.filter((row) => !(row.userId === userId && row.unitId === unitId)),
+        {
+          userId,
+          unitId,
+          positionSeconds: existing?.durationSeconds ?? existing?.positionSeconds ?? 0,
+          durationSeconds: existing?.durationSeconds ?? null,
+          completed: true,
+          watchedAt,
+          updatedAt: when,
+        },
+      ];
+    });
+  }
+  async markUnwatched(userId: string, unitIds: readonly string[]) {
+    this.rows = this.rows.map((row) =>
+      row.userId === userId && unitIds.includes(row.unitId) ? { ...row, positionSeconds: 0, completed: false, watchedAt: null } : row,
+    );
+  }
+  async forgetPosition(userId: string, unitId: string) {
+    this.rows = this.rows.map((row) =>
+      row.userId === userId && row.unitId === unitId ? { ...row, positionSeconds: 0, completed: false } : row,
+    );
+  }
   rows: WatchProgress[] = [];
   async get(userId: string, unitId: string) {
     return this.rows.find((row) => row.userId === userId && row.unitId === unitId) ?? null;
