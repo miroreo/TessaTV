@@ -49,6 +49,13 @@ export class DrizzleMediaAvailabilityRepository implements MediaAvailabilityRepo
     await this.db.update(unit).set({ availability, updatedAt: new Date() }).where(inArray(unit.id, [...unitIds]));
   }
 
+  async deleteUnlinkedMediaFiles(): Promise<number> {
+    const result = await this.db.execute(sql`
+      delete from media_file where not exists (select 1 from unit where unit.media_file_id = media_file.id)
+    `);
+    return result.rowCount ?? 0;
+  }
+
   async listRootsWithPlayableUnits(): Promise<Set<string>> {
     const result = await this.db.execute<{ root: string }>(sql`
       with recursive tree as (

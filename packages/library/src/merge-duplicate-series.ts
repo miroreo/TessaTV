@@ -78,6 +78,14 @@ async function mergeSeasonsInto(
     await repository.deleteNode(season.id);
   }
 
+  // The duplicate's folder is still on disk; without this, the next scan of it finds no
+  // series by that name and recreates the one just merged away.
+  const [primary, duplicate] = await Promise.all([repository.getNode(primaryId), repository.getNode(duplicateId)]);
+  if (primary && duplicate) {
+    const aliases = new Set([...(primary.sourceAliases ?? []), duplicate.sourceKey, ...(duplicate.sourceAliases ?? [])]);
+    aliases.delete(primary.sourceKey);
+    await repository.updateNode({ ...primary, sourceAliases: [...aliases], updatedAt: new Date() });
+  }
   await repository.deleteNode(duplicateId);
 }
 

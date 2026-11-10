@@ -65,7 +65,7 @@ describe("importMovies", () => {
 
     const result = await importMovies(repo, [movie]);
 
-    expect(result).toEqual({ created: 1, skipped: 0 });
+    expect(result).toEqual({ created: 1, skipped: 0, relinked: 0 });
     const [node] = await repo.listChildren(null);
     expect(node?.title).toBe("Example Movie");
     expect(node?.kind).toBe("leaf");
@@ -85,7 +85,7 @@ describe("importMovies", () => {
     await importMovies(repo, [movie]);
     const second = await importMovies(repo, [movie]);
 
-    expect(second).toEqual({ created: 0, skipped: 1 });
+    expect(second).toEqual({ created: 0, skipped: 1, relinked: 0 });
     expect(await repo.listChildren(null)).toHaveLength(1);
   });
 
@@ -100,7 +100,7 @@ describe("importMovies", () => {
 
     const second = await importMovies(repo, [movie]);
 
-    expect(second).toEqual({ created: 0, skipped: 1 });
+    expect(second).toEqual({ created: 0, skipped: 1, relinked: 0 });
     expect(await repo.listChildren(null)).toHaveLength(1);
   });
 });
@@ -120,7 +120,7 @@ describe("importShows", () => {
 
     const result = await importShows(repo, [series]);
 
-    expect(result).toEqual({ created: 3, skipped: 0 });
+    expect(result).toEqual({ created: 3, skipped: 0, relinked: 0 });
 
     const [seriesNode] = await repo.listChildren(null);
     expect(seriesNode?.kind).toBe("collection");
@@ -142,7 +142,7 @@ describe("importShows", () => {
     await importShows(repo, [sampleSeries(episodes)]);
     const second = await importShows(repo, [sampleSeries(episodes)]);
 
-    expect(second).toEqual({ created: 0, skipped: 1 });
+    expect(second).toEqual({ created: 0, skipped: 1, relinked: 0 });
   });
 
   it("still matches the series by folderName after its title has been overwritten (e.g. by identify) — the sourceKey bug fix", async () => {
@@ -159,7 +159,7 @@ describe("importShows", () => {
 
     const second = await importShows(repo, [series]);
 
-    expect(second).toEqual({ created: 0, skipped: 1 });
+    expect(second).toEqual({ created: 0, skipped: 1, relinked: 0 });
     expect(await repo.listChildren(null)).toHaveLength(1);
   });
 });

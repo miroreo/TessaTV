@@ -135,6 +135,7 @@
         <div class="stats stats-vertical sm:stats-horizontal bg-base-100">
           <div class="stat"><div class="stat-title">Episodes added</div><div class="stat-value text-2xl">{last.episodesAdded}</div></div>
           <div class="stat"><div class="stat-title">Movies added</div><div class="stat-value text-2xl">{last.moviesAdded}</div></div>
+          <div class="stat"><div class="stat-title">Files replaced</div><div class="stat-value text-2xl">{last.relinked}</div></div>
           <div class="stat"><div class="stat-title">Now missing</div><div class="stat-value text-2xl">{last.markedMissing}</div></div>
           <div class="stat"><div class="stat-title">Back again</div><div class="stat-value text-2xl">{last.restored}</div></div>
         </div>

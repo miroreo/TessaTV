@@ -8,8 +8,8 @@ import { scanMoviesDirectory } from "./scan-movies.js";
 import { scanShowsDirectory } from "./scan-shows.js";
 
 export interface ImportFoldersResult {
-  movies?: { created: number; skipped: number; skippedFolders: { path: string; reason: string }[] };
-  shows?: { created: number; skipped: number; seriesFound: number };
+  movies?: { created: number; skipped: number; relinked: number; skippedFolders: { path: string; reason: string }[] };
+  shows?: { created: number; skipped: number; relinked: number; seriesFound: number };
   identify?: AutoIdentifySummary;
   duplicateSeries?: MergeDuplicateSeriesSummary;
 }
@@ -31,6 +31,7 @@ export async function importFolders(
     result.movies = {
       created: (result.movies?.created ?? 0) + counts.created,
       skipped: (result.movies?.skipped ?? 0) + counts.skipped,
+      relinked: (result.movies?.relinked ?? 0) + counts.relinked,
       skippedFolders: [...(result.movies?.skippedFolders ?? []), ...scanned.skipped],
     };
   }
@@ -41,6 +42,7 @@ export async function importFolders(
     result.shows = {
       created: (result.shows?.created ?? 0) + counts.created,
       skipped: (result.shows?.skipped ?? 0) + counts.skipped,
+      relinked: (result.shows?.relinked ?? 0) + counts.relinked,
       seriesFound: (result.shows?.seriesFound ?? 0) + scanned.series.length,
     };
   }
@@ -120,6 +122,8 @@ export async function scanLibrary(folders: readonly LibraryFolder[], deps: Libra
   }
   await deps.availability.setAvailability(missing, "missing");
   await deps.availability.setAvailability(restored, "available");
+  // Files replaced by a relink above no longer belong to anything.
+  await deps.availability.deleteUnlinkedMediaFiles();
 
   return { import: imported, markedMissing: missing.length, restored: restored.length, skippedFolders };
 }

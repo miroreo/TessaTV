@@ -14,6 +14,7 @@ export function toDomainLibraryNode(
     title: row.title,
     sortTitle: row.sortTitle,
     sourceKey: row.sourceKey,
+    sourceAliases: row.sourceAliases,
     externalIds,
     monitored: row.monitored,
     qualityProfileId: row.qualityProfileId,

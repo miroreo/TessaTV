@@ -35,10 +35,13 @@ class InMemoryLibraryRepository implements LibraryRepository {
   async updateUnit(unit: Unit) {
     this.units.set(unit.id, unit);
   }
-  async getMediaFile(): Promise<MediaFile | null> {
-    return null;
+  files = new Map<string, MediaFile>();
+  async getMediaFile(id: string): Promise<MediaFile | null> {
+    return this.files.get(id) ?? null;
   }
-  async createMediaFile() {}
+  async createMediaFile(file: MediaFile) {
+    this.files.set(file.id, file);
+  }
 }
 
 function makeNode(overrides: Partial<LibraryNode> & { id: string }): LibraryNode {
@@ -226,5 +229,24 @@ describe("confirmSeriesMerge", () => {
     expect(await repo.getNode("series-b")).toBeNull();
     const primarySeasons = await repo.listChildren("series-a");
     expect(primarySeasons.map((s) => s.id)).toEqual(["season-b1"]);
+  });
+});
+
+describe("merging remembers the duplicate's folder", () => {
+  it("so a later scan of that folder lands on the survivor instead of recreating the series", async () => {
+    const { importShows } = await import("./importer.js");
+    const repository = new InMemoryLibraryRepository();
+    const episode = (season: number, n: number) => ({
+      season, episode: n, title: `E${n}`, filePath: `/shows/Show.Name/S0${season}E0${n}.mkv`, sizeBytes: 1, container: "mkv",
+    });
+    await importShows(repository, [{ title: "Show Name", folderName: "Show Name", episodes: [{ ...episode(1, 1), filePath: "/shows/Show Name/S01E01.mkv" }] }]);
+    await importShows(repository, [{ title: "Show Name", folderName: "Show.Name", episodes: [episode(2, 1)] }]);
+    const [primary, duplicate] = await repository.listChildren(null);
+    await confirmSeriesMerge(repository, primary!.id, duplicate!.id);
+    expect((await repository.getNode(primary!.id))?.sourceAliases).toEqual(["Show.Name"]);
+
+    const rescan = await importShows(repository, [{ title: "Show Name", folderName: "Show.Name", episodes: [episode(2, 1)] }]);
+    expect(rescan).toEqual({ created: 0, skipped: 1, relinked: 0 });
+    expect((await repository.listChildren(null)).map((node) => node.id)).toEqual([primary!.id]);
   });
 });

@@ -52,12 +52,23 @@ class InMemoryLibrary implements LibraryRepository, MediaAvailabilityRepository 
     this.files.set(file.id, file);
   }
   async listFilesUnder(folder: string): Promise<MediaFileLocation[]> {
+    // Like the real query: only files a unit currently points at.
     return [...this.files.values()]
-      .filter((file) => file.path.startsWith(`${folder}/`))
+      .filter((file) => file.path.startsWith(`${folder}/`) && this.units.get(file.unitId)?.mediaFileId === file.id)
       .map((file) => ({ unitId: file.unitId, path: file.path, availability: this.units.get(file.unitId)!.availability }));
   }
   async setAvailability(unitIds: readonly string[], availability: UnitAvailability) {
     for (const id of unitIds) this.units.set(id, { ...this.units.get(id)!, availability });
+  }
+  async deleteUnlinkedMediaFiles() {
+    const linked = new Set([...this.units.values()].map((unit) => unit.mediaFileId));
+    let deleted = 0;
+    for (const id of [...this.files.keys()]) {
+      if (linked.has(id)) continue;
+      this.files.delete(id);
+      deleted++;
+    }
+    return deleted;
   }
   async listRootsWithPlayableUnits() {
     return new Set<string>();
@@ -104,6 +115,28 @@ describe("scanLibrary", () => {
     expect(await scan([folder(shows)])).toMatchObject({ markedMissing: 0, restored: 1 });
     expect(availabilityByEpisode()).toEqual({ 1: "available", 2: "available" });
     expect([...library.units.keys()].sort()).toEqual(before);
+  });
+
+  it("follows a renamed file: same unit (so watch history carries over), new file, old record cleaned up", async () => {
+    await scan([folder(shows)]);
+    const episode1 = [...library.units.values()].find((unit) => unit.sequence.path[1] === 1)!;
+    const renamed = join(shows, "Show", "Season 01", "Show.S01E01.Proper.mkv");
+    await rm(episodePath(1));
+    await writeFile(renamed, "x");
+
+    const result = await scan([folder(shows)]);
+    expect(result).toMatchObject({ markedMissing: 0, import: { shows: { created: 0, relinked: 1 } } });
+    const after = library.units.get(episode1.id)!;
+    expect(after.availability).toBe("available");
+    expect(library.files.get(after.mediaFileId!)!.path).toBe(renamed);
+    expect(library.files.size).toBe(2);
+  });
+
+  it("keeps the existing link when the old file is still there alongside a new copy", async () => {
+    await scan([folder(shows)]);
+    await writeFile(join(shows, "Show", "Season 01", "Show.S01E01.Copy.mkv"), "x");
+    const result = await scan([folder(shows)]);
+    expect(result.import.shows).toMatchObject({ created: 0, relinked: 0 });
   });
 
   it("never treats an unreachable or empty folder as everything having been deleted", async () => {

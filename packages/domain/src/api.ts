@@ -150,6 +150,8 @@ export interface LibraryScanResult {
   readonly moviesAdded: number;
   readonly episodesAdded: number;
   readonly identified: number;
+  /** Existing items whose file was renamed or replaced, now pointing at the new file. */
+  readonly relinked: number;
   readonly markedMissing: number;
   readonly restored: number;
   /** Folders skipped this run, and why (e.g. unreachable — never treated as "everything's gone"). */

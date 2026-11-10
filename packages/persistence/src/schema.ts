@@ -26,6 +26,7 @@ export const libraryNode = pgTable("library_node", {
   title: text("title").notNull(),
   sortTitle: text("sort_title").notNull(),
   sourceKey: text("source_key").notNull(),
+  sourceAliases: jsonb("source_aliases").notNull().$type<string[]>().default([]),
   monitored: boolean("monitored").notNull().default(true),
   qualityProfileId: uuid("quality_profile_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

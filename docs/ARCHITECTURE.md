@@ -526,6 +526,17 @@ empty**, is skipped for that run (an unmounted drive's mount point is usually em
 read as "everything was deleted". One `isPlayable(unit)` rule (has a file and is
 `available`) drives the library, next up, continue watching and autoplay; titles with no
 playable units drop off the home page (`listRootsWithPlayableUnits`, a recursive CTE).
+Two bugs the first real scan exposed, both fixed: (1) a file that was renamed or replaced
+(e.g. `Grey's.Anatomy.S01E01…` → `Greys.Anatomy.S01E01…`, `.mp4` → `.mkv`) was skipped as
+"already imported" because the episode/movie existed, so the new file was ignored and the
+old one marked missing — now `relinkIfReplaced` points the existing unit at the new file
+when its old file is gone (same unit, so watch history carries over; if both files exist the
+current link wins), and orphaned `media_file` rows are deleted at the end of the scan. On
+the real library: 271 relinked, 1,454 of 1,470 files playable (the rest are unparseable
+names like `S01X01` webisodes, or duplicate copies). (2) Merging series deleted the
+duplicate node, so the next scan of its folder recreated it — the survivor now keeps the
+duplicate's folder name in `library_node.source_aliases` (migration 0009), which import
+lookups match on.
 
 Migrations now run at startup (`runMigrations`), so deploying a new version needs no
 manual step; it shares `drizzle-kit migrate`'s bookkeeping table.

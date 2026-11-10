@@ -57,4 +57,14 @@ describe("DrizzleLibraryRepository.updateNode", () => {
     const reloaded = await repository.getNode(child.id);
     expect(reloaded?.parentId).toBe(parentB.id);
   });
+
+  it("persists source aliases — the same class of bug, for the field series merging adds", async () => {
+    const node = fakeNode({ id: randomUUID() });
+    await repository.createNode(node);
+    createdIds.push(node.id);
+    expect((await repository.getNode(node.id))?.sourceAliases).toEqual([]);
+
+    await repository.updateNode({ ...node, sourceAliases: ["Show.Name", "Show Name (US)"] });
+    expect((await repository.getNode(node.id))?.sourceAliases).toEqual(["Show.Name", "Show Name (US)"]);
+  });
 });

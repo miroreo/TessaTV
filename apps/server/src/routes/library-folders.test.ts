@@ -110,7 +110,7 @@ describe("library folder and scan routes", () => {
     const auth = new AuthService(users, new Sessions());
     const { token } = await auth.completeSetup("admin", "a-long-enough-password", null);
     headers = { authorization: `Bearer ${token}` };
-    const availability = { listFilesUnder: async () => [], setAvailability: async () => {}, listRootsWithPlayableUnits: async () => new Set<string>() };
+    const availability = { listFilesUnder: async () => [], setAvailability: async () => {}, deleteUnlinkedMediaFiles: async () => 0, listRootsWithPlayableUnits: async () => new Set<string>() };
     const scanner = new LibraryScanner({ folders, repository: library, availability, providers: {} });
     app = buildApp({ libraryRepository: library, metadataProviders: {}, auth, libraryFolders: { folders, scanner } });
   });

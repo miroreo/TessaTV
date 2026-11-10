@@ -64,6 +64,13 @@
       "when": 1794290769474,
       "tag": "0008_public_machine_man",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794332554327,
+      "tag": "0009_colorful_the_fury",
+      "breakpoints": true
     }
   ]
 }

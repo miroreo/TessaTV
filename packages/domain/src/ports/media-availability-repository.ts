@@ -14,6 +14,8 @@ export interface MediaAvailabilityRepository {
   /** Every media file whose path is inside `folder`. */
   listFilesUnder(folder: string): Promise<MediaFileLocation[]>;
   setAvailability(unitIds: readonly string[], availability: UnitAvailability): Promise<void>;
+  /** Deletes media files no unit points at any more (left behind when a file is replaced). */
+  deleteUnlinkedMediaFiles(): Promise<number>;
   /** Root nodes (movies, series) with at least one playable unit beneath them. */
   listRootsWithPlayableUnits(): Promise<Set<string>>;
 }

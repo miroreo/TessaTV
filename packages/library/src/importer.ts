@@ -1,12 +1,22 @@
 import type { LibraryNode, LibraryRepository, MediaFile, Unit } from "@tessatv/domain";
 import { randomUUID } from "node:crypto";
+import { access } from "node:fs/promises";
 import type { ScannedMovie } from "./scan-movies.js";
 import type { ScannedSeries } from "./scan-shows.js";
 
 export interface ImportCounts {
   readonly created: number;
   readonly skipped: number;
+  /** Existing movies/episodes whose file was replaced (renamed, upgraded) and now point at the new one. */
+  readonly relinked: number;
 }
+
+export interface ImportOptions {
+  /** Test seam. */
+  readonly exists?: (path: string) => Promise<boolean>;
+}
+
+const pathExists = (path: string) => access(path).then(() => true, () => false);
 
 /**
  * Matches on `sourceKey`, never `title` — `title` gets overwritten with a provider's
@@ -20,7 +30,7 @@ async function findChildBySourceKey(
   sourceKey: string,
 ): Promise<LibraryNode | null> {
   const children = await repository.listChildren(parentId);
-  return children.find((child) => child.sourceKey === sourceKey) ?? null;
+  return children.find((child) => child.sourceKey === sourceKey || child.sourceAliases?.includes(sourceKey)) ?? null;
 }
 
 /** Exported for reuse by `merge-duplicate-series.ts`, which needs the same "does this
@@ -107,6 +117,42 @@ async function createLeafWithFile(
   await repository.updateUnit({ ...unit, mediaFileId: fileId, availability: "available", updatedAt: new Date() });
 }
 
+/**
+ * When a movie or episode that's already in the library turns up under a different file —
+ * renamed, re-encoded, swapped for a better copy — and the file it points at is gone, points
+ * it at the new one. The unit stays the same, so its watch history carries over. If the old
+ * file is still there too, the existing link wins, so duplicate copies don't flip-flop.
+ */
+async function relinkIfReplaced(
+  repository: LibraryRepository,
+  leaf: LibraryNode,
+  scanned: { filePath: string; sizeBytes: number; container: string },
+  exists: (path: string) => Promise<boolean>,
+): Promise<boolean> {
+  const [unit] = await repository.listUnits(leaf.id);
+  if (!unit) return false;
+  const current = unit.mediaFileId ? await repository.getMediaFile(unit.mediaFileId) : null;
+  if (current?.path === scanned.filePath) return false;
+  if (current && (await exists(current.path))) return false;
+
+  const file: MediaFile = {
+    id: randomUUID(),
+    unitId: unit.id,
+    path: scanned.filePath,
+    container: scanned.container,
+    videoCodec: null,
+    audioCodec: null,
+    resolutionWidth: null,
+    resolutionHeight: null,
+    sizeBytes: scanned.sizeBytes,
+    checksum: null,
+    importedAt: new Date(),
+  };
+  await repository.createMediaFile(file);
+  await repository.updateUnit({ ...unit, mediaFileId: file.id, availability: "available", updatedAt: new Date() });
+  return true;
+}
+
 async function findOrCreateCollection(
   repository: LibraryRepository,
   parentId: string | null,
@@ -140,14 +186,18 @@ async function findOrCreateCollection(
 export async function importMovies(
   repository: LibraryRepository,
   movies: readonly ScannedMovie[],
+  options: ImportOptions = {},
 ): Promise<ImportCounts> {
+  const exists = options.exists ?? pathExists;
   let created = 0;
   let skipped = 0;
+  let relinked = 0;
 
   for (const movie of movies) {
     const existing = await findChildBySourceKey(repository, null, movie.folderName);
     if (existing) {
-      skipped++;
+      if (await relinkIfReplaced(repository, existing, movie, exists)) relinked++;
+      else skipped++;
       continue;
     }
 
@@ -164,16 +214,19 @@ export async function importMovies(
     created++;
   }
 
-  return { created, skipped };
+  return { created, skipped, relinked };
 }
 
 /** Idempotent per episode: re-running matches existing episodes by (season, episode), not title. */
 export async function importShows(
   repository: LibraryRepository,
   series: readonly ScannedSeries[],
+  options: ImportOptions = {},
 ): Promise<ImportCounts> {
+  const exists = options.exists ?? pathExists;
   let created = 0;
   let skipped = 0;
+  let relinked = 0;
 
   for (const show of series) {
     const seriesNode = await findOrCreateCollection(repository, null, "series", show.title, show.folderName);
@@ -199,7 +252,8 @@ export async function importShows(
 
       const existing = await findEpisodeNodeBySequence(repository, seasonNode.id, episode.season, episode.episode);
       if (existing) {
-        skipped++;
+        if (await relinkIfReplaced(repository, existing, episode, exists)) relinked++;
+        else skipped++;
         continue;
       }
 
@@ -217,5 +271,5 @@ export async function importShows(
     }
   }
 
-  return { created, skipped };
+  return { created, skipped, relinked };
 }

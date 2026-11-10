@@ -24,6 +24,12 @@ export interface LibraryNode {
    * previously-identified item's folder is rescanned.
    */
   readonly sourceKey: string;
+  /**
+   * Other source folder names that now belong to this node: when two folders turn out to be
+   * the same show and get merged, the survivor keeps the other's `sourceKey` here so the next
+   * scan of that folder lands on it instead of recreating the series it was merged into.
+   */
+  readonly sourceAliases?: readonly string[];
   readonly externalIds: readonly ExternalId[];
   readonly monitored: boolean;
   readonly qualityProfileId: string | null;

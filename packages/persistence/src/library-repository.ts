@@ -35,6 +35,7 @@ export class DrizzleLibraryRepository implements LibraryRepository {
       title: node.title,
       sortTitle: node.sortTitle,
       sourceKey: node.sourceKey,
+      sourceAliases: [...(node.sourceAliases ?? [])],
       monitored: node.monitored,
       qualityProfileId: node.qualityProfileId,
       createdAt: node.createdAt,
@@ -48,6 +49,7 @@ export class DrizzleLibraryRepository implements LibraryRepository {
       .update(libraryNodeTable)
       .set({
         parentId: node.parentId,
+        sourceAliases: [...(node.sourceAliases ?? [])],
         title: node.title,
         sortTitle: node.sortTitle,
         monitored: node.monitored,

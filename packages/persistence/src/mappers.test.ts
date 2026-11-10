@@ -19,6 +19,7 @@ describe("toDomainLibraryNode", () => {
         title: "Example Movie",
         sortTitle: "example movie",
         sourceKey: "Example Movie (1999)",
+        sourceAliases: [],
         monitored: true,
         qualityProfileId: null,
         createdAt: now,
