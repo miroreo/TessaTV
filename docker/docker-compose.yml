@@ -21,12 +21,14 @@ services:
       # import (`POST /api/library/import`) are the same in both places.
       - ${MEDIA_ROOT:?set MEDIA_ROOT to your media directory}:${MEDIA_ROOT}:ro
       - transcodes:/transcodes
-    # Hardware transcoding: uncomment if the host has /dev/dri (Intel/AMD GPU).
+    # Hardware transcoding: uncomment if the host has /dev/dri (Intel/AMD GPU). The app runs
+    # as an unprivileged user, so it also needs the device's group, by number (group names
+    # resolve inside the container, where `render` doesn't exist):
+    #   stat -c %g /dev/dri/renderD128
     # devices:
     #   - /dev/dri:/dev/dri
     # group_add:
-    #   - video
-    #   - render
+    #   - "<gid from stat>"
 
   postgres:
     image: postgres:16

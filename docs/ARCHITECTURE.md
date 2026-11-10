@@ -556,12 +556,21 @@ manual step; it shares `drizzle-kit migrate`'s bookkeeping table.
 
 ### Deployment (Docker)
 
-`docker/docker-compose.yml` runs the app + Postgres. Set `MEDIA_ROOT` (mounted read-only at
-the same path, so import paths match) and the usual `.env`; the compose file overrides
-`DATABASE_URL` for the container network. Uncomment the `devices`/`group_add` block to pass
-`/dev/dri` for VAAPI. Serves on 8096 (Jellyfin's port). The image is Debian 12 (ffmpeg 5.1 +
-Mesa/Intel VA drivers); smoke-tested here with VAAPI, including 4K HDR tone-mapping + PGS
-burn-in at ~2× realtime. Postgres is now bound to `127.0.0.1` only.
+Full guide, including NixOS `oci-containers` against the host's `services.postgresql`:
+`docs/DEPLOYMENT.md`. `docker/Dockerfile` builds one image (server + UI + ffmpeg + Mesa/Intel
+VA drivers, Debian 12): the build stage reinstalls production dependencies into fresh
+`node_modules` (`pnpm install --prod` over an existing install leaves dev packages in the
+virtual store, which roughly doubled the app layer), and the runtime runs as the
+unprivileged `node` user under `tini`, with a `/health` `HEALTHCHECK`. Any uid works, which
+is what lets NixOS run it as a host user for Postgres peer auth over the mounted
+`/run/postgresql` socket (`DATABASE_URL=postgresql://tessatv@%2Frun%2Fpostgresql/tessatv`).
+Because it isn't root, VAAPI needs the render node's group **by number** (`group_add`).
+`docker/docker-compose.yml` runs the app + its own Postgres (bound to `127.0.0.1`); set
+`MEDIA_ROOT` (mounted read-only at the same path, so library paths match). Serves on 8096
+(Jellyfin's port). Earlier smoke test on the real machine: VAAPI 4K HDR tone-mapping + PGS
+burn-in at ~2× realtime. `loadConfig` treats empty env values as unset: env files pass
+`.env.example`'s blank `TMDB_API_KEY=` through as `""`, which used to fail validation and
+stop the container at startup.
 
 ### Jellyfin compatibility layer (not yet built)
 
@@ -682,7 +691,7 @@ pnpm exec turbo watch dev --filter=@tessatv/server --filter=@tessatv/web
 # Build + test everything
 pnpm turbo run build test
 
-# Deploy (after creating .env from .env.example)
+# Deploy (after creating .env from .env.example; NixOS: see docs/DEPLOYMENT.md)
 MEDIA_ROOT=/path/to/media docker compose -f docker/docker-compose.yml up -d --build
 
 # Lint — MUST run from the repo root, not per-package (see note below)

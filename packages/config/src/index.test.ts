@@ -37,6 +37,15 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...validEnv, TVDB_API_KEY: "a-real-key" }).TVDB_API_KEY).toBe("a-real-key");
   });
 
+  it("treats empty values as unset, as env files write them (`TMDB_API_KEY=`)", () => {
+    const config = loadConfig({ ...validEnv, TMDB_API_KEY: "", TVDB_API_KEY: "", PORT: "", HARDWARE_ACCEL: "" });
+    expect(config.TMDB_API_KEY).toBeUndefined();
+    expect(config.TVDB_API_KEY).toBeUndefined();
+    expect(config.PORT).toBe(8096);
+    expect(config.HARDWARE_ACCEL).toBe("auto");
+    expect(() => loadConfig({ ...validEnv, APP_SECRET: "" })).toThrow(/APP_SECRET/);
+  });
+
   it("defaults transcoding settings, and rejects an unknown hardware accel mode", () => {
     expect(loadConfig(validEnv)).toMatchObject({ HARDWARE_ACCEL: "auto", MAX_CONCURRENT_TRANSCODES: 3 });
     expect(loadConfig(validEnv).TRANSCODE_DIR).toMatch(/tessatv-transcodes$/);

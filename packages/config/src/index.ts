@@ -21,7 +21,10 @@ export type AppConfig = z.infer<typeof envSchema>;
 
 /** Fails fast on invalid/missing config at startup rather than limping along partially configured. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const result = envSchema.safeParse(env);
+  // An empty value (`TMDB_API_KEY=` as in .env.example, passed through by env files) means
+  // unset, so optional keys stay off and defaults apply instead of failing validation.
+  const set = Object.fromEntries(Object.entries(env).filter(([, value]) => value !== ""));
+  const result = envSchema.safeParse(set);
   if (!result.success) {
     const issues = result.error.issues.map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`).join("\n");
     throw new Error(`Invalid configuration:\n${issues}`);
