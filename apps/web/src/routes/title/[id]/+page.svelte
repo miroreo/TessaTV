@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { UnitSummary } from "@tessatv/domain";
   import { episodeCode, formatTime, progressFraction } from "$lib/api.js";
+  import Icon from "$lib/Icon.svelte";
   import type { PageData } from "./$types.js";
 
   let { data }: { data: PageData } = $props();
@@ -37,7 +38,7 @@
       {#if title.year}<div class="opacity-70">{title.year}</div>{/if}
       {#if title.overview}<p class="max-w-2xl py-4 leading-relaxed">{title.overview}</p>{/if}
       {#if view.next}
-        <a class="btn btn-warning" href="/watch/{view.next.id}">▶ {playLabel(view.next)}</a>
+        <a class="btn btn-warning" href="/watch/{view.next.id}"><Icon name="play" /> {playLabel(view.next)}</a>
       {:else if view.units.length > 0}
         <span class="opacity-60">Nothing playable yet.</span>
       {/if}
@@ -74,7 +75,7 @@
             <progress class="progress progress-warning mt-1 block h-1" value={progressFraction(episode.progress)} max="1"></progress>
           {/if}
         </div>
-        {#if episode.progress?.completed}<span class="text-warning" title="Watched">✓</span>{/if}
+        {#if episode.progress?.completed}<span class="text-warning" title="Watched"><Icon name="check" /></span>{/if}
       </li>
     {/each}
   </ul>

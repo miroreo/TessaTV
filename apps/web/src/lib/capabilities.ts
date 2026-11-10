@@ -1,27 +1,7 @@
 import type { ClientCapabilities, VideoCodecSupport } from "@tessatv/streaming";
+import { getMaxBitrate } from "./preferences.js";
 
 export type HlsEngine = "native" | "hls.js" | "none";
-
-/** Quality cap in bits/second; null means "original" (no cap). Remembered per browser. */
-const QUALITY_KEY = "tessatv.maxBitrate";
-
-export function getMaxBitrate(): number | null {
-  try {
-    const stored = Number(localStorage.getItem(QUALITY_KEY));
-    return stored > 0 ? stored : null;
-  } catch {
-    return null;
-  }
-}
-
-export function setMaxBitrate(value: number | null): void {
-  try {
-    if (value) localStorage.setItem(QUALITY_KEY, String(value));
-    else localStorage.removeItem(QUALITY_KEY);
-  } catch {
-    // Private mode etc. — the choice just won't persist.
-  }
-}
 
 type ManagedMediaSourceWindow = Window & { ManagedMediaSource?: typeof MediaSource };
 

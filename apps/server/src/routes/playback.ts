@@ -145,13 +145,16 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       audioStreams: media.audioStreams.map((stream) => ({
         index: stream.index,
         label: `${streamLabel(stream)} · ${stream.channels}ch`,
+        language: stream.language,
         isDefault: stream.isDefault,
       })),
       subtitleStreams: media.subtitleStreams.map((stream) => ({
         index: stream.index,
         label: `${streamLabel(stream)}${stream.isForced ? " · forced" : ""}${stream.isTextBased ? "" : " · burned in"}`,
+        language: stream.language,
         isDefault: stream.isDefault,
         isForced: stream.isForced,
+        isTextBased: stream.isTextBased,
       })),
       next: next ? unitSummary(next, null) : null,
     };

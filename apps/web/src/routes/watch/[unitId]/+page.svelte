@@ -2,7 +2,18 @@
   import { goto } from "$app/navigation";
   import type { PlaybackSessionResponse as PlaybackSession } from "@tessatv/domain";
   import { api, episodeCode, formatTime } from "$lib/api.js";
-  import { detectCapabilities, getMaxBitrate, setMaxBitrate } from "$lib/capabilities.js";
+  import { detectCapabilities } from "$lib/capabilities.js";
+  import Icon from "$lib/Icon.svelte";
+  import {
+    getMaxBitrate,
+    getVolume,
+    pickAudio,
+    pickSubtitles,
+    rememberAudio,
+    rememberSubtitles,
+    setMaxBitrate,
+    setVolume,
+  } from "$lib/preferences.js";
   import Hls from "hls.js";
   import { onDestroy, onMount } from "svelte";
   import type { PageData } from "./$types.js";
@@ -20,6 +31,9 @@
   ];
   const PROGRESS_INTERVAL_MS = 10_000;
   const NEXT_COUNTDOWN_SECONDS = 10;
+  const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+  /** Volume above 1 is boost; the element itself stops at 100%. */
+  const MAX_VOLUME = 2;
 
   let container: HTMLDivElement;
   let video: HTMLVideoElement;
@@ -43,6 +57,15 @@
   let audioIndex = $state<number | null>(null);
   let subtitleIndex = $state<number | null>(null);
   let maxBitrate = $state<number | null>(null);
+  /** 0–MAX_VOLUME. Above 1, the extra is applied as gain through Web Audio. */
+  let volume = $state(1);
+  let audioGraph: { context: AudioContext; gain: GainNode } | null = null;
+  let muted = $state(false);
+  let rate = $state(1);
+  let fullscreen = $state(false);
+  /** Brief centred feedback for keyboard actions ("Volume 40%", "1.5×", "+10s"). */
+  let flash = $state<string | null>(null);
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
 
   const offset = $derived(session?.startTimeSeconds ?? 0);
   const position = $derived(scrubbing ?? offset + streamTime);
@@ -52,10 +75,10 @@
   );
 
   onMount(() => {
-    audioIndex = info.audioStreams.find((stream) => stream.isDefault)?.index ?? info.audioStreams[0]?.index ?? null;
-    // Subtitles stay off unless the file marks a forced track (foreign-language dialogue).
-    subtitleIndex = info.subtitleStreams.find((stream) => stream.isForced)?.index ?? null;
+    audioIndex = pickAudio(info.audioStreams)?.index ?? null;
+    subtitleIndex = pickSubtitles(info.subtitleStreams)?.index ?? null;
     maxBitrate = getMaxBitrate();
+    ({ volume, muted } = getVolume());
     const progress = info.unit.progress;
     const resumeAt = progress && !progress.completed ? progress.positionSeconds : 0;
     void start(resumeAt);
@@ -64,6 +87,7 @@
   });
 
   onDestroy(() => {
+    void audioGraph?.context.close();
     clearInterval(countdownTimer);
     clearTimeout(hideTimer);
     leave();
@@ -114,6 +138,8 @@
     const seekWhenReady = () => {
       // An in-progress transcode looks like a live stream; without this, players jump to its end.
       video.currentTime = streamSeconds;
+      // A new source resets the rate; volume survives on the element.
+      video.playbackRate = rate;
       void video.play().catch(() => (paused = true));
     };
     video.addEventListener("loadedmetadata", seekWhenReady, { once: true });
@@ -208,18 +234,134 @@
   function alignSubtitles(event: Event) {
     const track = (event.currentTarget as HTMLTrackElement).track;
     const shift = session?.startTimeSeconds ?? 0;
-    if (!shift || !track.cues) return;
-    for (const cue of Array.from(track.cues)) {
-      cue.startTime = Math.max(0, cue.startTime - shift);
-      cue.endTime -= shift;
+    if (shift && track.cues) {
+      for (const cue of Array.from(track.cues)) {
+        cue.startTime = Math.max(0, cue.startTime - shift);
+        cue.endTime -= shift;
+      }
+    }
+    placeSubtitles();
+  }
+
+  /**
+   * Subtitles render at the bottom of the video, right where the control bar sits; while
+   * the controls are showing, move them up out of its way (a negative line counts up from
+   * the bottom).
+   */
+  function placeSubtitles() {
+    if (!video) return;
+    for (const track of Array.from(video.textTracks)) {
+      if (!track.cues) continue;
+      for (const cue of Array.from(track.cues) as VTTCue[]) cue.line = controlsVisible ? -4 : "auto";
     }
   }
 
-  function changeTracks() {
+  $effect(() => {
+    void controlsVisible;
+    placeSubtitles();
+  });
+
+  /** A dropdown keeps focus after a pick; let go of it so the keyboard drives the player again. */
+  function release(event: Event) {
+    (event.currentTarget as HTMLElement).blur();
+  }
+
+  function changeAudio(event: Event) {
+    release(event);
+    rememberAudio(info.audioStreams.find((stream) => stream.index === audioIndex));
     void start(position);
   }
 
-  function changeQuality() {
+  function changeSubtitles(event: Event) {
+    release(event);
+    applySubtitles();
+  }
+
+  function applySubtitles() {
+    rememberSubtitles(info.subtitleStreams.find((stream) => stream.index === subtitleIndex));
+    void start(position);
+  }
+
+  /** YouTube's "c": off, or back on in the remembered language (else the first text track). */
+  function toggleCaptions() {
+    if (info.subtitleStreams.length === 0) return;
+    if (subtitleIndex !== null) {
+      subtitleIndex = null;
+    } else {
+      const fallback = info.subtitleStreams.find((stream) => stream.isTextBased && !stream.isForced) ?? info.subtitleStreams[0];
+      const remembered = pickSubtitles(info.subtitleStreams);
+      subtitleIndex = (remembered && !remembered.isForced ? remembered : fallback)?.index ?? null;
+    }
+    showFlash(subtitleIndex === null ? "Subtitles off" : "Subtitles on");
+    applySubtitles();
+  }
+
+  $effect(() => {
+    if (!video) return;
+    video.volume = Math.min(volume, 1);
+    video.muted = muted;
+    applyBoost(Math.max(volume, 1));
+    // Boost is for one unusually quiet file, so only the ordinary level is remembered.
+    setVolume(Math.min(volume, 1), muted);
+  });
+
+  /**
+   * Amplifies past 100% by routing the element through a gain node, with a limiter after
+   * it so loud peaks don't clip. Built on first use only: once an element is routed through
+   * Web Audio it stays that way, so files nobody boosts keep the browser's direct path.
+   */
+  function applyBoost(gain: number) {
+    if (gain <= 1 && !audioGraph) return;
+    if (!audioGraph) {
+      const context = new AudioContext();
+      const amplifier = context.createGain();
+      const limiter = context.createDynamicsCompressor();
+      limiter.threshold.value = -3;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.25;
+      context.createMediaElementSource(video).connect(amplifier).connect(limiter).connect(context.destination);
+      audioGraph = { context, gain: amplifier };
+    }
+    void audioGraph.context.resume();
+    audioGraph.gain.gain.value = gain;
+  }
+
+  const volumeLabel = () => `Volume ${Math.round(volume * 100)}%${volume > 1 ? " (boosted)" : ""}`;
+
+  function showFlash(message: string) {
+    flash = message;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => (flash = null), 800);
+  }
+
+  function nudgeVolume(delta: number) {
+    volume = Math.round(Math.min(MAX_VOLUME, Math.max(0, volume + delta)) * 100) / 100;
+    muted = volume === 0;
+    showFlash(volumeLabel());
+  }
+
+  function toggleMute() {
+    muted = !muted;
+    if (!muted && volume === 0) volume = 0.5;
+    showFlash(muted ? "Muted" : volumeLabel());
+  }
+
+  function nudgeRate(direction: 1 | -1) {
+    const current = PLAYBACK_RATES.indexOf(rate);
+    rate = PLAYBACK_RATES[Math.min(PLAYBACK_RATES.length - 1, Math.max(0, current + direction))]!;
+    video.playbackRate = rate;
+    showFlash(`${rate}×`);
+  }
+
+  function skip(seconds: number) {
+    showFlash(`${seconds > 0 ? "+" : "−"}${Math.abs(seconds)}s`);
+    void seekTo(position + seconds);
+  }
+
+  function changeQuality(event: Event) {
+    release(event);
     setMaxBitrate(maxBitrate);
     void start(position);
   }
@@ -227,6 +369,10 @@
   function togglePlay() {
     if (video.paused) void video.play();
     else video.pause();
+  }
+
+  function onFullscreenChange() {
+    fullscreen = document.fullscreenElement !== null;
   }
 
   function toggleFullscreen() {
@@ -244,17 +390,34 @@
     }, 3000);
   }
 
+  /** YouTube's player shortcuts. */
   function onKey(event: KeyboardEvent) {
-    if ((event.target as HTMLElement).closest("select, input")) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const key = event.key.length === 1 && !event.shiftKey ? event.key.toLowerCase() : event.key;
     const actions: Record<string, () => void> = {
       " ": togglePlay,
       k: togglePlay,
+      j: () => skip(-10),
+      l: () => skip(10),
+      ArrowLeft: () => skip(-5),
+      ArrowRight: () => skip(5),
+      ArrowUp: () => nudgeVolume(0.05),
+      ArrowDown: () => nudgeVolume(-0.05),
+      m: toggleMute,
       f: toggleFullscreen,
-      ArrowLeft: () => void seekTo(position - 10),
-      ArrowRight: () => void seekTo(position + 30),
+      c: toggleCaptions,
+      Home: () => void seekTo(0),
+      End: () => void seekTo(duration - 1),
+      "<": () => nudgeRate(-1),
+      ">": () => nudgeRate(1),
+      N: playNext,
     };
-    const action = actions[event.key];
+    for (let digit = 0; digit <= 9; digit++) actions[String(digit)] = () => void seekTo((duration * digit) / 10);
+    const action = actions[key];
     if (!action) return;
+    // Whatever has focus: otherwise a focused dropdown takes arrow keys as "pick the
+    // neighbouring option" and silently switches tracks, and a focused button takes Space
+    // as a click.
     event.preventDefault();
     action();
     showControls();
@@ -266,6 +429,7 @@
 </svelte:head>
 
 <svelte:window onkeydown={onKey} />
+<svelte:document onfullscreenchange={onFullscreenChange} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="player fixed inset-0 bg-black text-white select-none" class:idle={!controlsVisible} bind:this={container} onmousemove={showControls}>
@@ -333,8 +497,14 @@
     </div>
   {/if}
 
+  {#if flash}
+    <div class="badge badge-neutral badge-lg pointer-events-none absolute top-1/4 left-1/2 -translate-x-1/2 bg-black/70">{flash}</div>
+  {/if}
+
   <div class="top absolute inset-x-0 top-0 flex items-center gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 py-3">
-    <button type="button" class="btn btn-ghost btn-sm" onclick={() => history.back()} aria-label="Back">←</button>
+    <button type="button" class="btn btn-ghost btn-circle btn-sm" onclick={() => history.back()} aria-label="Back" title="Back">
+      <Icon name="arrowLeft" />
+    </button>
     <span class="heading truncate">{heading}</span>
   </div>
 
@@ -350,39 +520,83 @@
       oninput={(event) => (scrubbing = Number(event.currentTarget.value))}
       onchange={(event) => {
         scrubbing = null;
+        release(event);
         void seekTo(Number(event.currentTarget.value));
       }}
     />
-    <div class="mt-2 flex flex-wrap items-center gap-2">
-      <button type="button" class="btn btn-ghost btn-sm" onclick={togglePlay} aria-label={paused ? "Play" : "Pause"}>{paused ? "▶" : "❚❚"}</button>
-      <button type="button" class="btn btn-ghost btn-sm" onclick={() => seekTo(position - 10)} aria-label="Back 10 seconds">−10</button>
-      <button type="button" class="btn btn-ghost btn-sm" onclick={() => seekTo(position + 30)} aria-label="Forward 30 seconds">+30</button>
-      <span class="time text-sm tabular-nums">{formatTime(position)} / {formatTime(duration)}</span>
-      <span class="flex-1"></span>
+    <div class="mt-2 flex flex-wrap items-center gap-1">
+      <button type="button" class="btn btn-ghost btn-circle btn-sm" onclick={togglePlay} aria-label={paused ? "Play" : "Pause"} title="{paused ? 'Play' : 'Pause'} (k)">
+        <Icon name={paused ? "play" : "pause"} />
+      </button>
+      <button type="button" class="btn btn-ghost btn-circle btn-sm" onclick={() => skip(-10)} aria-label="Back 10 seconds" title="Back 10s (j)">
+        <Icon name="back" />
+      </button>
+      <button type="button" class="btn btn-ghost btn-circle btn-sm" onclick={() => skip(10)} aria-label="Forward 10 seconds" title="Forward 10s (l)">
+        <Icon name="ahead" />
+      </button>
       {#if info.next}
-        <button type="button" class="btn btn-ghost btn-sm" onclick={playNext} title="Next episode">⏭</button>
+        <button type="button" class="btn btn-ghost btn-circle btn-sm" onclick={playNext} aria-label="Next episode" title="Next episode (Shift+N)">
+          <Icon name="next" />
+        </button>
       {/if}
+      <div class="group flex items-center">
+        <button type="button" class="btn btn-ghost btn-circle btn-sm" onclick={toggleMute} aria-label={muted ? "Unmute" : "Mute"} title="Mute (m)">
+          <Icon name={muted || volume === 0 ? "muted" : "volume"} />
+        </button>
+        <input
+          class="range range-xs mx-1 hidden w-28 sm:block"
+          class:range-warning={volume > 1 && !muted}
+          type="range"
+          min="0"
+          max={MAX_VOLUME}
+          step="0.05"
+          value={muted ? 0 : volume}
+          aria-label="Volume"
+          title="{Math.round(volume * 100)}% — past the middle boosts quiet audio"
+          oninput={(event) => {
+            volume = Number(event.currentTarget.value);
+            muted = volume === 0;
+          }}
+          onchange={release}
+        />
+        {#if volume > 1 && !muted}
+          <span class="badge badge-warning badge-sm" title="Boosted for this episode">{Math.round(volume * 100)}%</span>
+        {/if}
+      </div>
+      <span class="time ml-1 text-sm tabular-nums">{formatTime(position)} / {formatTime(duration)}</span>
+      <span class="flex-1"></span>
       {#if info.audioStreams.length > 1}
-        <select class="select select-sm w-auto" bind:value={audioIndex} onchange={changeTracks} aria-label="Audio track">
-          {#each info.audioStreams as stream (stream.index)}
-            <option value={stream.index}>{stream.label}</option>
-          {/each}
-        </select>
+        <label class="select select-sm w-auto" title="Audio track">
+          <Icon name="volume" class="size-4 opacity-70" />
+          <select bind:value={audioIndex} onchange={changeAudio} aria-label="Audio track">
+            {#each info.audioStreams as stream (stream.index)}
+              <option value={stream.index}>{stream.label}</option>
+            {/each}
+          </select>
+        </label>
       {/if}
       {#if info.subtitleStreams.length > 0}
-        <select class="select select-sm w-auto" bind:value={subtitleIndex} onchange={changeTracks} aria-label="Subtitles">
-          <option value={null}>Subtitles off</option>
-          {#each info.subtitleStreams as stream (stream.index)}
-            <option value={stream.index}>{stream.label}</option>
+        <label class="select select-sm w-auto" title="Subtitles (c)">
+          <Icon name="subtitles" class="size-4 opacity-70" />
+          <select bind:value={subtitleIndex} onchange={changeSubtitles} aria-label="Subtitles">
+            <option value={null}>Off</option>
+            {#each info.subtitleStreams as stream (stream.index)}
+              <option value={stream.index}>{stream.label}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+      <label class="select select-sm w-auto" title="Quality">
+        <Icon name="adjustments" class="size-4 opacity-70" />
+        <select bind:value={maxBitrate} onchange={changeQuality} aria-label="Quality">
+          {#each QUALITIES as quality (quality.label)}
+            <option value={quality.value}>{quality.label}</option>
           {/each}
         </select>
-      {/if}
-      <select class="select select-sm w-auto" bind:value={maxBitrate} onchange={changeQuality} aria-label="Quality">
-        {#each QUALITIES as quality (quality.label)}
-          <option value={quality.value}>{quality.label}</option>
-        {/each}
-      </select>
-      <button type="button" class="btn btn-ghost btn-sm" onclick={toggleFullscreen} aria-label="Fullscreen">⛶</button>
+      </label>
+      <button type="button" class="btn btn-ghost btn-circle btn-sm" onclick={toggleFullscreen} aria-label="Fullscreen" title="Fullscreen (f)">
+        <Icon name={fullscreen ? "exitFullscreen" : "fullscreen"} />
+      </button>
     </div>
     {#if session && session.mode !== "direct-play"}
       <div class="mt-1 text-xs opacity-60" title={session.reasons.join(", ")}>{session.mode === "remux" ? "Remuxing" : "Transcoding"}</div>

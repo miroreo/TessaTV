@@ -103,8 +103,12 @@ export interface TitleResponse {
 export interface StreamOption {
   readonly index: number;
   readonly label: string;
+  /** ISO 639 code from the file's tags, when it has one. */
+  readonly language: string | null;
   readonly isDefault: boolean;
   readonly isForced?: boolean;
+  /** Subtitles only: false means picking it forces a burn-in transcode. */
+  readonly isTextBased?: boolean;
 }
 
 /** `GET /api/playback/:unitId` */

@@ -236,6 +236,8 @@ describe("browse, playback and progress routes", () => {
   it("describes a unit's tracks and what plays after it", async () => {
     const info = (await app.inject({ method: "GET", url: "/api/playback/e1", headers })).json();
     expect(info).toMatchObject({ durationSeconds: 1000, next: { id: "e2" }, title: { id: "show" } });
-    expect(info.subtitleStreams).toEqual([{ index: 2, label: "ENG · SUBRIP", isDefault: false, isForced: false }]);
+    expect(info.subtitleStreams).toEqual([
+      { index: 2, label: "ENG · SUBRIP", language: "eng", isDefault: false, isForced: false, isTextBased: true },
+    ]);
   });
 });

@@ -263,6 +263,9 @@ importers:
       '@tessatv/streaming':
         specifier: workspace:*
         version: link:../../packages/streaming
+      heroicons:
+        specifier: ^2.2.0
+        version: 2.2.0
       hls.js:
         specifier: ^1.7.4
         version: 1.7.4
@@ -2496,6 +2499,9 @@ packages:
   hasown@2.0.4:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
+
+  heroicons@2.2.0:
+    resolution: {integrity: sha512-yOwvztmNiBWqR946t+JdgZmyzEmnRMC2nxvHFC90bF1SUttwB6yJKYeme1JeEcBfobdOs827nCyiWBS2z/brog==}
 
   hls.js@1.7.4:
     resolution: {integrity: sha512-3GlxGdPvT2YHvQYOt+yOzT/DEior/qJVNIylHA77kgeoBTdQQqi70GwefNEUmHQeNGyjC8U62+bruqW/Tpm+tg==}
@@ -5066,6 +5072,8 @@ snapshots:
   hasown@2.0.4:
     dependencies:
       function-bind: 1.1.2
+
+  heroicons@2.2.0: {}
 
   hls.js@1.7.4: {}
 
