@@ -1,8 +1,10 @@
 <script lang="ts">
   import type { WatchEntrySummary } from "@tessatv/domain";
+  import { invalidateAll } from "$app/navigation";
   import { episodeCode, progressFraction } from "$lib/api.js";
   import PosterCard from "$lib/PosterCard.svelte";
   import Shelf from "$lib/Shelf.svelte";
+  import { forgetPosition } from "$lib/watched.js";
   import type { PageData } from "./$types.js";
 
   let { data }: { data: PageData } = $props();
@@ -11,6 +13,12 @@
   function entrySubtitle(entry: WatchEntrySummary): string {
     const code = episodeCode(entry.unit);
     return code ? `${code} · ${entry.unit.title}` : "";
+  }
+
+  /** Forgets where they were, which is what puts it on this shelf; "watched" stays as it was. */
+  async function removeFromContinueWatching(entry: WatchEntrySummary) {
+    await forgetPosition(entry.unit.id);
+    await invalidateAll();
   }
 </script>
 
@@ -24,6 +32,8 @@
         subtitle={entrySubtitle(entry)}
         imageUrl={entry.title.backdropUrl ?? entry.title.posterUrl}
         progress={progressFraction(entry.unit.progress)}
+        removeLabel="Remove from Continue watching"
+        onremove={() => void removeFromContinueWatching(entry)}
       />
     {/each}
   </Shelf>

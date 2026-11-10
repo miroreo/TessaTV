@@ -1,7 +1,10 @@
 <script lang="ts">
   import type { UnitSummary } from "@tessatv/domain";
+  import { invalidateAll } from "$app/navigation";
   import { episodeCode, formatTime, progressFraction } from "$lib/api.js";
   import Icon from "$lib/Icon.svelte";
+  import { forgetPosition, setWatched } from "$lib/watched.js";
+  import WatchedMenu from "$lib/WatchedMenu.svelte";
   import type { PageData } from "./$types.js";
 
   let { data }: { data: PageData } = $props();
@@ -12,6 +15,28 @@
   let chosenSeason = $state<number | null>(null);
   const season = $derived(chosenSeason ?? view.next?.season ?? view.seasons[0]?.number ?? null);
   const episodes = $derived(view.seasons.find((entry) => entry.number === season)?.episodes ?? []);
+
+  /** A movie is one unit with no seasons; its menu sits by the play button. */
+  const movie = $derived(view.seasons.length === 0 && view.units.length === 1 ? view.units[0]! : null);
+  const seasonUnits = $derived(episodes.filter((episode) => episode.playable));
+  const seasonWatched = $derived(
+    seasonUnits.every((episode) => episode.progress?.watched) ? true : seasonUnits.some((episode) => episode.progress?.watched) ? null : false,
+  );
+  let actionError = $state<string | null>(null);
+
+  const canForget = (unit: UnitSummary) => !!unit.progress && !unit.progress.completed && unit.progress.positionSeconds > 0;
+
+  /** Runs a watched-state change, then reloads the page's data so ticks, progress and "play" update. */
+  async function apply(units: readonly UnitSummary[], action: "watched" | "unwatched" | "forget") {
+    actionError = null;
+    try {
+      if (action === "forget") await Promise.all(units.map((unit) => forgetPosition(unit.id)));
+      else await setWatched(units.map((unit) => unit.id), action === "watched");
+      await invalidateAll();
+    } catch (cause) {
+      actionError = (cause as Error).message;
+    }
+  }
 
   function playLabel(next: UnitSummary): string {
     const code = episodeCode(next);
@@ -37,17 +62,30 @@
       <h1 class="text-3xl font-bold">{title.title}</h1>
       {#if title.year}<div class="opacity-70">{title.year}</div>{/if}
       {#if title.overview}<p class="max-w-2xl py-4 leading-relaxed">{title.overview}</p>{/if}
-      {#if view.next}
-        <a class="btn btn-warning" href="/watch/{view.next.id}"><Icon name="play" /> {playLabel(view.next)}</a>
-      {:else if view.units.length > 0}
-        <span class="opacity-60">Nothing playable yet.</span>
-      {/if}
+      <div class="flex items-center gap-2">
+        {#if view.next}
+          <a class="btn btn-warning" href="/watch/{view.next.id}"><Icon name="play" /> {playLabel(view.next)}</a>
+        {:else if view.units.length > 0 && !movie?.progress?.watched}
+          <span class="opacity-60">Nothing playable yet.</span>
+        {/if}
+        {#if movie?.playable}
+          {#if movie.progress?.watched}<span class="text-warning" title="Watched"><Icon name="check" /></span>{/if}
+          <WatchedMenu
+            label={title.title}
+            watched={movie.progress?.watched ?? false}
+            canForget={canForget(movie)}
+            onpick={(action) => apply([movie], action)}
+          />
+        {/if}
+      </div>
+      {#if actionError}<div class="alert alert-error mt-3">{actionError}</div>{/if}
     </div>
   </div>
 </div>
 
 {#if view.seasons.length > 0}
-  <div role="tablist" class="tabs tabs-box mb-4 flex-wrap">
+  <div class="mb-4 flex items-start gap-2">
+  <div role="tablist" class="tabs tabs-box flex-1 flex-wrap">
     {#each view.seasons as entry (entry.number)}
       <button
         type="button"
@@ -59,6 +97,14 @@
         {entry.number === 0 ? "Specials" : `Season ${entry.number}`}
       </button>
     {/each}
+  </div>
+    {#if seasonUnits.length > 0}
+      <WatchedMenu
+        label={season === 0 ? "Specials" : `Season ${season}`}
+        watched={seasonWatched}
+        onpick={(action) => apply(seasonUnits, action)}
+      />
+    {/if}
   </div>
 
   <ul class="list bg-base-200 rounded-box">
@@ -76,6 +122,14 @@
           {/if}
         </div>
         {#if episode.progress?.watched}<span class="text-warning" title="Watched"><Icon name="check" /></span>{/if}
+        {#if episode.playable}
+          <WatchedMenu
+            label={episode.title}
+            watched={episode.progress?.watched ?? false}
+            canForget={canForget(episode)}
+            onpick={(action) => apply([episode], action)}
+          />
+        {/if}
       </li>
     {/each}
   </ul>

@@ -4,6 +4,10 @@ import adjustments from "heroicons/24/solid/adjustments-horizontal.svg?raw";
 import rescan from "heroicons/24/solid/arrow-path.svg?raw";
 import stats from "heroicons/24/solid/chart-bar.svg?raw";
 import close from "heroicons/24/solid/x-mark.svg?raw";
+import menu from "heroicons/24/solid/ellipsis-vertical.svg?raw";
+import markWatched from "heroicons/24/solid/eye.svg?raw";
+import markUnwatched from "heroicons/24/solid/eye-slash.svg?raw";
+import restart from "heroicons/24/solid/backward.svg?raw";
 import settings from "heroicons/24/solid/cog-6-tooth.svg?raw";
 import warning from "heroicons/24/solid/exclamation-triangle.svg?raw";
 import folder from "heroicons/24/solid/folder.svg?raw";
@@ -28,6 +32,10 @@ export const icons = {
   rescan,
   stats,
   close,
+  menu,
+  markWatched,
+  markUnwatched,
+  restart,
   settings,
   warning,
   folder,
