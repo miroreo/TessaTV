@@ -4,7 +4,7 @@ This is the living reference for TessaTV's design and plan. It started as a plan
 doc before any code existed; it's now kept in the repo so decisions and status don't
 live only in chat history.
 
-## Status (as of 2026-10-20)
+## Status (as of 2026-11-10)
 
 Repo: https://github.com/miroreo/TessaTV (private).
 
@@ -62,6 +62,11 @@ Repo: https://github.com/miroreo/TessaTV (private).
   blind, structured so those slot in later without changing the abstraction. `apps/server`
   now selects the hardware accel at startup and owns a `TranscodeManager`, but no route
   uses it yet — that's the playback API above.
+- ✅ **Library-first refactor (2026-11-09).** Nine PRs, all merged: pg-boss, zod request
+  validation, @fastify/cookie, ky, @ctrl/video-filename-parser, Argon2, execa (short commands),
+  shared `/api` types, and a daisyUI UI. This is now a standing rule — see "Library-first"
+  under Decisions. Migration 0005 drops the old `scheduled_job` table; pg-boss creates its
+  own `pgboss` schema on first start.
 - ⬜ **M4 — Acquisition pipeline, first protocol.** Not started.
 - ⬜ **M5 — Second protocol adapter.** Not started.
 - ⬜ **M6 — Deeper Jellyfin-compat coverage.** Not started.
@@ -123,6 +128,52 @@ The explicit goals driving every structural choice below:
   locked down behind login.
 - Hardware transcoding (VAAPI/NVENC/QSV) is in scope early, not deferred — moved up in the
   roadmap alongside the rest of the streaming subsystem.
+
+**Library-first (decided 2026-11-09)**
+
+The owner asked for a full refactor to cut unnecessary overhead, then made it a standing
+rule for all future work:
+- Where a maintained open source library does the job, use it instead of hand-rolled code.
+  Check for one *before* writing a parser, HTTP client, validator, or helper.
+- Repeat code only when strictly necessary. Types shared by the server and the UI live in
+  one place (`packages/domain/src/api.ts`), not copied on each side.
+- UI and design components come from open source libraries: **daisyUI** (Tailwind classes,
+  no JS components) with plain Svelte for the wiring — chosen over shadcn-svelte, Skeleton
+  and Flowbite.
+- Make no assumptions. If a choice between libraries (or between a library and our own code)
+  isn't clear, ask.
+
+How to apply it, learned from the nine refactor PRs (#1–#9, all merged):
+- A library replaces our code only if it doesn't make results worse. Keep a thin wrapper of
+  our own where the library falls short, and say why in a comment.
+- Wrap a library behind our own narrow interface at the edges that matter for testing or
+  swapping (`MetadataProvider`, `JobDefinition`/`JobScheduler`, `ProcessSpawner`,
+  `AuthService`). Don't re-export a library's whole surface through our packages.
+- Don't adopt a library that is unmaintained (fluent-ffmpeg is archived) or that fights a
+  locked decision (a full auth framework like better-auth would fight the Jellyfin token flow).
+- Weigh the dependency against the code it removes: the execa swap saves only ~10 lines, and
+  was offered to the owner as optional for that reason.
+
+What replaced what, and what was deliberately kept:
+- Job scheduling: **pg-boss** replaced the hand-rolled polling `JobRunner` (adds cron,
+  retries and locking; its `pgboss` schema replaced the `scheduled_job` table).
+- API validation: **fastify-type-provider-zod** replaced hand-written `typeof` body checks.
+- Cookies: **@fastify/cookie** replaced the hand-rolled cookie parser/builder.
+- Metadata HTTP: **ky** for the TMDB and TheTVDB clients (real HTTP error detection via
+  `isHTTPError` instead of searching error text for "404"; TheTVDB's re-login-and-retry on a
+  401 uses ky's retry hook). The response types stay hand-written; **tmdb-ts** was considered and skipped (a third-party SDK to keep up
+  with, and TheTVDB would still need our own client).
+- Episode filename parsing: **@ctrl/video-filename-parser** (a port of Sonarr's parser).
+  *Kept:* our own folder-name parser (`parse-title-year.ts`), because the library mangles
+  names like `Example..Show (2012)`.
+- Passwords: **@node-rs/argon2** (Argon2id) replaced scrypt; old scrypt hashes still verify
+  and are rehashed on the next login.
+- Processes: **execa** for short-lived commands only (ffprobe, subtitle extraction and the
+  like, via `runCommand`).
+  *Kept:* plain `spawn` for long-running ffmpeg transcodes, because the session listens to
+  the process's events directly, and our own ffmpeg argument builder (fluent-ffmpeg is archived).
+- Shared `/api` types in `packages/domain/src/api.ts`, used by `apps/server` and `apps/web`.
+- UI: rebuilt on **daisyUI 5 + Tailwind v4**.
 
 **Deployment & stack**
 - Single self-hosted app process, internally modular (clean package boundaries, could be
@@ -254,9 +305,10 @@ see git history around the parser-hardening commits):
   **directly inside** its folder — deliberately not recursive, so a folder that happens to
   contain a nested duplicate library root gets reported as "no video file found" instead of
   being misidentified as one giant movie.
-- TV episodes: tries, in order, `SxxExx` (modern), `NxEE` (legacy Kodi/XBMC-style), then
-  absolute/anime-style numbering (season defaults to 1, since that convention carries no
-  season info) — read from the filename itself, not the season-folder name, since real
+- TV episodes: parsed by `@ctrl/video-filename-parser` (a port of Sonarr's parser) — `SxxExx`,
+  `NxEE`, absolute/anime-style numbering (season defaults to 1, since that convention carries
+  no season info), and a multi-episode file is read as its first episode (one file = one
+  Unit) — read from the filename itself, not the season-folder name, since real
   libraries have inconsistent/duplicate/empty season folders.
 
 ### Metadata (done)
@@ -415,8 +467,10 @@ model entirely) — stub as unsupported.
 `domain` defines `User`/`AuthSession` and the `UserRepository`/`AuthSessionRepository`
 ports; `persistence` implements them (`app_user` — `user` is reserved in Postgres — and
 `auth_session`); `packages/auth`'s `AuthService` holds the logic:
-- Passwords: scrypt (Node built-in, N=2^15, r=8, p=1, parameters stored in each hash so
-  they can be raised later), NFKC-normalized, constant-time compare. Unknown usernames are
+- Passwords: Argon2id via `@node-rs/argon2` (library defaults: 19 MiB, t=2, p=1; parameters
+  are encoded in each hash so they can be raised later), NFKC-normalized, constant-time
+  compare. Hashes from before the switch (`scrypt$...`) still verify and are rehashed on the
+  next login; remove that legacy path once no `scrypt$` hashes remain in `app_user`. Unknown usernames are
   verified against a dummy hash so login timing doesn't reveal which accounts exist.
 - Sessions: 256-bit random bearer tokens; only their SHA-256 is stored, so a leaked
   session table isn't usable. No expiry — a session lasts until logout (deleting the row).
@@ -431,7 +485,7 @@ ports; `persistence` implements them (`app_user` — `user` is reserved in Postg
 (deny-by-default, matched case-insensitively since routing is), except `GET
 /api/auth/session` (needs-setup + current user, what the UI routes on), `POST
 /api/auth/setup`, `/login`, `/logout`. The browser gets the token as an HttpOnly,
-SameSite=Lax cookie (`Secure` only over HTTPS — the LAN setup is plain HTTP); other
+SameSite=Lax cookie via `@fastify/cookie` (`Secure` only over HTTPS — the LAN setup is plain HTTP); other
 clients send `Authorization: Bearer <token>` (the login/setup responses also return it).
 Non-`/api` routes (`/health`, Jellyfin discovery, the UI itself) stay public. The UI's
 root layout load sends people to `/setup`, `/login`, or the app based on
@@ -577,10 +631,10 @@ deleting them.)
   correctly follow pnpm's symlinked workspace packages to their real path.
 - Movie folder scanning is deliberately non-recursive — see "Library / manual import"
   above. This was a real bug caught during manual testing, not a design guess.
-- Episode filename parsing is intentionally built against public conventions (Jellyfin's
-  naming spec, Kodi/XBMC's `1x05`, fansub absolute numbering) rather than iteratively
-  patched to fit one library's files — that distinction was an explicit course-correction
-  mid-build.
+- Episode filename parsing relies on public conventions (via @ctrl/video-filename-parser)
+  rather than being iteratively patched to fit one library's files — that distinction was an
+  explicit course-correction mid-build. Movie *folder-name* parsing is still ours, because the
+  library mangles names like `Example..Show (2012)`.
 - `apps/server` serves the UI by importing `@tessatv/web/handler` (SvelteKit adapter-node's
   built handler) as Fastify's not-found handler — so the UI on :8080 shows the last *build*, not the vite dev server.
   adapter-node assumes `https` unless a protocol header says otherwise, which made SSR's
