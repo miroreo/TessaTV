@@ -8,6 +8,8 @@
     type ServerSettingsResponse,
   } from "@tessatv/domain";
   import { invalidateAll } from "$app/navigation";
+  // Not `window`: this page is also rendered on the server.
+  import { page } from "$app/state";
   import { api } from "$lib/api.js";
   import Icon from "$lib/Icon.svelte";
   import { onDestroy } from "svelte";
@@ -105,7 +107,7 @@
     const saved = savedOidc;
     sso = {
       enabled: saved?.enabled ?? false,
-      publicUrl: saved?.publicUrl ?? window.location.origin,
+      publicUrl: saved?.publicUrl ?? page.url.origin,
       issuerUrl: saved?.issuerUrl ?? "",
       clientId: saved?.clientId ?? "",
       clientSecret: "",
@@ -114,7 +116,7 @@
       buttonLabel: saved?.buttonLabel ?? "Sign in with Authentik",
     };
   });
-  const callbackUrl = $derived(`${sso.publicUrl.replace(/\/+$/, "") || window.location.origin}/api/auth/oidc/callback`);
+  const callbackUrl = $derived(`${sso.publicUrl.replace(/\/+$/, "") || page.url.origin}/api/auth/oidc/callback`);
   let savingSso = $state(false);
   let ssoMessage = $state<{ ok: boolean; text: string } | null>(null);
 
