@@ -29,6 +29,8 @@
   /** Runs a watched-state change, then reloads the page's data so ticks, progress and "play" update. */
   async function apply(units: readonly UnitSummary[], action: "watched" | "unwatched" | "forget") {
     actionError = null;
+    // The page opens on the season "play" would start, which these change; stay put instead.
+    chosenSeason ??= season;
     try {
       if (action === "forget") await Promise.all(units.map((unit) => forgetPosition(unit.id)));
       else await setWatched(units.map((unit) => unit.id), action === "watched");
