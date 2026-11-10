@@ -65,7 +65,10 @@ export interface TitleSummary {
 export interface UnitProgress {
   readonly positionSeconds: number;
   readonly durationSeconds: number | null;
+  /** The current viewing reached the end (cleared by a rewatch). */
   readonly completed: boolean;
+  /** Ever watched to the end; never cleared by a rewatch. */
+  readonly watched: boolean;
 }
 
 export interface UnitSummary {

@@ -45,16 +45,31 @@ async function fixture() {
 describe("DrizzleWatchProgressRepository", () => {
   it("overwrites the one row per user and unit", async () => {
     const { userId, unitIds } = await fixture();
-    const base = { userId, unitId: unitIds[0], durationSeconds: 100, completed: false };
+    const base = { userId, unitId: unitIds[0], durationSeconds: 100, completed: false, watchedAt: null };
     await progress.save({ ...base, positionSeconds: 10, updatedAt: new Date(1_000) });
-    await progress.save({ ...base, positionSeconds: 95, completed: true, updatedAt: new Date(2_000) });
-    expect(await progress.get(userId, unitIds[0])).toEqual({ ...base, positionSeconds: 95, completed: true, updatedAt: new Date(2_000) });
+    await progress.save({ ...base, positionSeconds: 95, completed: true, watchedAt: new Date(2_000), updatedAt: new Date(2_000) });
+    expect(await progress.get(userId, unitIds[0])).toEqual({
+      ...base, positionSeconds: 95, completed: true, watchedAt: new Date(2_000), updatedAt: new Date(2_000),
+    });
+  });
+
+  it("keeps a unit watched through a rewatch, and only moves watchedAt forward", async () => {
+    const { userId, unitIds } = await fixture();
+    const base = { userId, unitId: unitIds[0], durationSeconds: 100 };
+    await progress.save({ ...base, positionSeconds: 95, completed: true, watchedAt: new Date(2_000), updatedAt: new Date(2_000) });
+    await progress.save({ ...base, positionSeconds: 5, completed: false, watchedAt: null, updatedAt: new Date(3_000) });
+    expect(await progress.get(userId, unitIds[0])).toMatchObject({ positionSeconds: 5, completed: false, watchedAt: new Date(2_000) });
+    await progress.save({ ...base, positionSeconds: 99, completed: true, watchedAt: new Date(1_000), updatedAt: new Date(4_000) });
+    expect((await progress.get(userId, unitIds[0]))?.watchedAt).toEqual(new Date(2_000));
+    await progress.save({ ...base, positionSeconds: 99, completed: true, watchedAt: new Date(5_000), updatedAt: new Date(5_000) });
+    expect((await progress.get(userId, unitIds[0]))?.watchedAt).toEqual(new Date(5_000));
   });
 
   it("lists most recent first, and by unit", async () => {
     const { userId, unitIds } = await fixture();
-    await progress.save({ userId, unitId: unitIds[0], positionSeconds: 1, durationSeconds: null, completed: false, updatedAt: new Date(1_000) });
-    await progress.save({ userId, unitId: unitIds[1], positionSeconds: 2, durationSeconds: null, completed: false, updatedAt: new Date(2_000) });
+    const unwatched = { durationSeconds: null, completed: false, watchedAt: null };
+    await progress.save({ userId, unitId: unitIds[0], positionSeconds: 1, ...unwatched, updatedAt: new Date(1_000) });
+    await progress.save({ userId, unitId: unitIds[1], positionSeconds: 2, ...unwatched, updatedAt: new Date(2_000) });
     expect((await progress.listRecent(userId, 10)).map((row) => row.unitId)).toEqual([unitIds[1], unitIds[0]]);
     expect(await progress.listRecent(userId, 1)).toHaveLength(1);
     expect((await progress.listForUnits(userId, [unitIds[0]])).map((row) => row.positionSeconds)).toEqual([1]);
@@ -63,7 +78,9 @@ describe("DrizzleWatchProgressRepository", () => {
 
   it("refuses to delete a unit, its node or its user while watch history exists", async () => {
     const { userId, unitIds } = await fixture();
-    await progress.save({ userId, unitId: unitIds[0], positionSeconds: 5, durationSeconds: null, completed: false, updatedAt: new Date() });
+    await progress.save({
+      userId, unitId: unitIds[0], positionSeconds: 5, durationSeconds: null, completed: false, watchedAt: null, updatedAt: new Date(),
+    });
     await expect(db.delete(unit).where(eq(unit.id, unitIds[0]))).rejects.toThrow();
     await expect(library.deleteNode(nodeIds.at(-1)!)).rejects.toThrow();
     await expect(db.delete(appUser).where(eq(appUser.id, userId))).rejects.toThrow();
@@ -74,7 +91,10 @@ describe("DrizzleWatchProgressRepository", () => {
     const { userId, unitIds } = await fixture();
     const other = (await fixture()).userId;
     const row = (unitId: string, positionSeconds: number, completed: boolean, at: number, user = userId) =>
-      progress.save({ userId: user, unitId, positionSeconds, durationSeconds: 100, completed, updatedAt: new Date(at) });
+      progress.save({
+        userId: user, unitId, positionSeconds, durationSeconds: 100, completed,
+        watchedAt: completed ? new Date(at) : null, updatedAt: new Date(at),
+      });
     await row(unitIds[0], 40, false, 2_000); // newer position, not watched
     await row(unitIds[1], 95, true, 1_000); // older, but watched
     await row(unitIds[0], 10, false, 3_000, other); // only on the source
@@ -82,7 +102,8 @@ describe("DrizzleWatchProgressRepository", () => {
     await library.moveWatchProgress(unitIds[0], unitIds[1]);
 
     expect(await progress.get(userId, unitIds[1])).toEqual({
-      userId, unitId: unitIds[1], positionSeconds: 40, durationSeconds: 100, completed: true, updatedAt: new Date(2_000),
+      userId, unitId: unitIds[1], positionSeconds: 40, durationSeconds: 100, completed: false,
+      watchedAt: new Date(1_000), updatedAt: new Date(2_000),
     });
     expect((await progress.get(other, unitIds[1]))?.positionSeconds).toBe(10);
     expect(await progress.get(userId, unitIds[0])).toBeNull();

@@ -62,7 +62,12 @@ export function unitSummary(unit: Unit, progress: WatchProgress | null): UnitSum
     episode: episode ?? null,
     playable: isPlayable(unit),
     progress: progress
-      ? { positionSeconds: progress.positionSeconds, durationSeconds: progress.durationSeconds, completed: progress.completed }
+      ? {
+          positionSeconds: progress.positionSeconds,
+          durationSeconds: progress.durationSeconds,
+          completed: progress.completed,
+          watched: progress.watchedAt !== null,
+        }
       : null,
   };
 }

@@ -67,7 +67,7 @@
         <span class="w-8 text-right tabular-nums opacity-60">{episode.episode ?? ""}</span>
         <div class="list-col-grow">
           {#if episode.playable}
-            <a class="link link-hover" class:opacity-70={episode.progress?.completed} href="/watch/{episode.id}">{episode.title}</a>
+            <a class="link link-hover" class:opacity-70={episode.progress?.watched} href="/watch/{episode.id}">{episode.title}</a>
           {:else}
             {episode.title} <span class="badge badge-ghost badge-sm">missing</span>
           {/if}
@@ -75,7 +75,7 @@
             <progress class="progress progress-warning mt-1 block h-1" value={progressFraction(episode.progress)} max="1"></progress>
           {/if}
         </div>
-        {#if episode.progress?.completed}<span class="text-warning" title="Watched"><Icon name="check" /></span>{/if}
+        {#if episode.progress?.watched}<span class="text-warning" title="Watched"><Icon name="check" /></span>{/if}
       </li>
     {/each}
   </ul>

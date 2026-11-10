@@ -154,6 +154,7 @@ export const watchProgress = pgTable(
     positionSeconds: doublePrecision("position_seconds").notNull(),
     durationSeconds: doublePrecision("duration_seconds"),
     completed: boolean("completed").notNull().default(false),
+    watchedAt: timestamp("watched_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

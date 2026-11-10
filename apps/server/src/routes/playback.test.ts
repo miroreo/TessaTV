@@ -57,7 +57,10 @@ class InMemoryProgress implements WatchProgressRepository {
     return this.rows.find((row) => row.userId === userId && row.unitId === unitId) ?? null;
   }
   async save(progress: WatchProgress) {
-    this.rows = [...this.rows.filter((row) => row.unitId !== progress.unitId), progress];
+    // Like the real repository, a save never clears or rewinds watchedAt.
+    const previous = (await this.get(progress.userId, progress.unitId))?.watchedAt ?? null;
+    const watchedAt = previous && (!progress.watchedAt || previous > progress.watchedAt) ? previous : progress.watchedAt;
+    this.rows = [...this.rows.filter((row) => row.unitId !== progress.unitId), { ...progress, watchedAt }];
   }
   async listRecent(userId: string) {
     return this.rows.filter((row) => row.userId === userId).reverse();
@@ -230,8 +233,21 @@ describe("browse, playback and progress routes", () => {
 
     const title = (await app.inject({ method: "GET", url: "/api/browse/title/show", headers })).json();
     expect(title.next.id).toBe("e2");
-    expect(title.seasons).toMatchObject([{ number: 1, episodes: [{ id: "e1", progress: { completed: true } }, { id: "e2" }] }]);
+    expect(title.seasons).toMatchObject([{ number: 1, episodes: [{ id: "e1", progress: { completed: true, watched: true } }, { id: "e2" }] }]);
     expect((await app.inject({ method: "POST", url: "/api/progress/e1", headers, payload: { positionSeconds: -1 } })).statusCode).toBe(400);
+  });
+
+  it("keeps an episode watched while it's rewatched, resuming the rewatch", async () => {
+    await app.inject({ method: "POST", url: "/api/progress/e1", headers, payload: { positionSeconds: 1000, durationSeconds: 1000, ended: true } });
+    await app.inject({ method: "POST", url: "/api/progress/e1", headers, payload: { positionSeconds: 120, durationSeconds: 1000 } });
+
+    const title = (await app.inject({ method: "GET", url: "/api/browse/title/show", headers })).json();
+    expect(title.seasons[0].episodes[0]).toMatchObject({
+      id: "e1",
+      progress: { positionSeconds: 120, completed: false, watched: true },
+    });
+    const home = (await app.inject({ method: "GET", url: "/api/browse/home", headers })).json();
+    expect(home.continueWatching.map((entry: { unit: { id: string } }) => entry.unit.id)).toEqual(["e1"]);
   });
 
   it("describes a unit's tracks and what plays after it", async () => {

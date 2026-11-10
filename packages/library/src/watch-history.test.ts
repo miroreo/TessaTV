@@ -72,7 +72,7 @@ function unit(id: string, libraryNodeId: string, path: number[], mediaFileId: st
   };
 }
 function progress(unitId: string, at: number, overrides: Partial<WatchProgress> = {}): WatchProgress {
-  return { userId: "u", unitId, positionSeconds: 600, durationSeconds: 1200, completed: false, updatedAt: new Date(at), ...overrides };
+  return { userId: "u", unitId, positionSeconds: 600, durationSeconds: 1200, completed: false, watchedAt: null, updatedAt: new Date(at), ...overrides };
 }
 
 /** A two-season show (inserted out of order, to prove sorting) plus a movie. */

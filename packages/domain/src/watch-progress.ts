@@ -8,7 +8,12 @@ export interface WatchProgress {
   readonly positionSeconds: number;
   /** As reported by the player; null until it knows. */
   readonly durationSeconds: number | null;
+  /** Whether the current viewing reached the end. Starting a rewatch clears it; resume,
+   * continue watching and next up go by this. */
   readonly completed: boolean;
+  /** When it was last watched to the end, null if never. Sticky: a rewatch never clears it
+   * (the repository keeps the latest), so it's what "watched" means to the user. */
+  readonly watchedAt: Date | null;
   readonly updatedAt: Date;
 }
 

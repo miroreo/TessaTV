@@ -1,5 +1,5 @@
 import type { WatchProgress, WatchProgressRepository } from "@tessatv/domain";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "./db.js";
 import { watchProgress } from "./schema.js";
 
@@ -10,6 +10,7 @@ function toDomain(row: typeof watchProgress.$inferSelect): WatchProgress {
     positionSeconds: row.positionSeconds,
     durationSeconds: row.durationSeconds,
     completed: row.completed,
+    watchedAt: row.watchedAt,
     updatedAt: row.updatedAt,
   };
 }
@@ -34,8 +35,12 @@ export class DrizzleWatchProgressRepository implements WatchProgressRepository {
     };
     await this.db
       .insert(watchProgress)
-      .values({ userId: progress.userId, unitId: progress.unitId, ...values })
-      .onConflictDoUpdate({ target: [watchProgress.userId, watchProgress.unitId], set: values });
+      .values({ userId: progress.userId, unitId: progress.unitId, ...values, watchedAt: progress.watchedAt })
+      .onConflictDoUpdate({
+        target: [watchProgress.userId, watchProgress.unitId],
+        // `greatest` ignores nulls, so a rewatch's save can't clear "watched".
+        set: { ...values, watchedAt: sql`greatest(${watchProgress.watchedAt}, excluded.watched_at)` },
+      });
   }
 
   async listRecent(userId: string, limit: number): Promise<WatchProgress[]> {

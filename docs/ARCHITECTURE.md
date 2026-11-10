@@ -487,6 +487,11 @@ isn't on `PATH`, so run tests inside `nix develop`.
 - `POST /api/progress/:unitId {positionSeconds, durationSeconds, ended}` — one
   `watch_progress` row per (user, unit) (migration 0006); ≥90% counts as watched, <30s isn't resumable.
   `continueWatching`/`nextUp`/`pickNextUnit` live in `packages/library`.
+- Two separate notions of "watched": `completed` is about the *current* viewing (a rewatch
+  clears it; resume, continue watching, next up and autoplay go by it), while `watched_at`
+  (migration 0011, backfilled from completed rows) is sticky — the upsert keeps
+  `greatest(old, new)`, so no save can clear or rewind it. The UI's watched check mark uses
+  `watched` (from `watched_at`), so it survives a rewatch.
 - **Watch history is never deleted as a side effect.** Both `watch_progress` foreign keys
   are `ON DELETE RESTRICT` (migration 0010), so Postgres refuses to delete a unit, its
   node or a user that still has history. Code that removes a unit must first move its

@@ -289,13 +289,16 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       if (!(await libraryRepository.getUnit(request.params.unitId))) return reply.code(404).send({ error: "not_found" });
       const { positionSeconds, ended } = request.body;
       const durationSeconds = request.body.durationSeconds ?? null;
+      const completed = ended === true || isCompletedPosition(positionSeconds, durationSeconds);
+      const now = new Date();
       await progressRepository.save({
         userId: request.user!.id,
         unitId: request.params.unitId,
         positionSeconds,
         durationSeconds,
-        completed: ended === true || isCompletedPosition(positionSeconds, durationSeconds),
-        updatedAt: new Date(),
+        completed,
+        watchedAt: completed ? now : null,
+        updatedAt: now,
       });
       return reply.code(204).send();
     },

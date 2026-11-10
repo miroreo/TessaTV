@@ -111,15 +111,17 @@ export class DrizzleLibraryRepository implements LibraryRepository {
     // One transaction, so the history is never in neither place.
     await this.db.transaction(async (tx) => {
       await tx.execute(sql`
-        insert into ${watchProgress} (user_id, unit_id, position_seconds, duration_seconds, completed, updated_at)
-        select user_id, ${toUnitId}, position_seconds, duration_seconds, completed, updated_at
+        insert into ${watchProgress} (user_id, unit_id, position_seconds, duration_seconds, completed, watched_at, updated_at)
+        select user_id, ${toUnitId}, position_seconds, duration_seconds, completed, watched_at, updated_at
         from ${watchProgress} where unit_id = ${fromUnitId}
         on conflict (user_id, unit_id) do update set
           position_seconds = case when excluded.updated_at > ${watchProgress}.updated_at
             then excluded.position_seconds else ${watchProgress}.position_seconds end,
           duration_seconds = case when excluded.updated_at > ${watchProgress}.updated_at
             then excluded.duration_seconds else ${watchProgress}.duration_seconds end,
-          completed = ${watchProgress}.completed or excluded.completed,
+          completed = case when excluded.updated_at > ${watchProgress}.updated_at
+            then excluded.completed else ${watchProgress}.completed end,
+          watched_at = greatest(${watchProgress}.watched_at, excluded.watched_at),
           updated_at = greatest(${watchProgress}.updated_at, excluded.updated_at)
       `);
       await tx.delete(watchProgress).where(eq(watchProgress.unitId, fromUnitId));
