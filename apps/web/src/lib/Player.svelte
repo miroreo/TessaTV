@@ -46,7 +46,6 @@
   /** Long enough playing with no decoded picture to call it a silent video decode failure. */
   const NO_PICTURE_SECONDS = 4;
 
-  let container: HTMLDivElement;
   // State so the stats panel, which gets it as a prop, sees it once it's bound.
   let video: HTMLVideoElement = $state.raw()!;
   let hls = $state.raw<Hls | null>(null);
@@ -125,6 +124,8 @@
     maxBitrate = getMaxBitrate();
     ({ volume, muted } = getVolume());
     normalize = getNormalize();
+    // Arriving from the previous episode's autoplay, still fullscreen.
+    fullscreen = document.fullscreenElement !== null;
     userActivated = navigator.userActivation?.hasBeenActive ?? false;
     const activate = () => (userActivated = true);
     window.addEventListener("pointerdown", activate, { once: true });
@@ -541,7 +542,10 @@
 
   function toggleFullscreen() {
     if (document.fullscreenElement) void document.exitFullscreen();
-    else if (container.requestFullscreen) void container.requestFullscreen();
+    // The whole page rather than this player: the next episode gets a new player, and
+    // removing the fullscreen element would drop the browser out of fullscreen. The player
+    // covers the page anyway; the watch page exits fullscreen when you leave it.
+    else if (document.documentElement.requestFullscreen) void document.documentElement.requestFullscreen();
     // iOS only allows the video element itself to go fullscreen, with its own controls.
     else (video as HTMLVideoElement & { webkitEnterFullscreen?: () => void }).webkitEnterFullscreen?.();
   }
@@ -597,7 +601,7 @@
 <svelte:document onfullscreenchange={onFullscreenChange} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="player fixed inset-0 bg-black text-white select-none" class:idle={!controlsVisible} bind:this={container} onmousemove={showControls}>
+<div class="player fixed inset-0 bg-black text-white select-none" class:idle={!controlsVisible} onmousemove={showControls}>
   <!-- svelte-ignore a11y_media_has_caption -->
   <video
     class="size-full object-contain"
