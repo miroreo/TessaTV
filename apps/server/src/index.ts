@@ -10,6 +10,8 @@ import {
   DrizzleLibraryRepository,
   DrizzleMetadataCacheRepository,
   DrizzleUserRepository,
+  DrizzleWatchProgressRepository,
+  runMigrations,
 } from "@tessatv/persistence";
 import { selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
@@ -20,6 +22,7 @@ const METADATA_REFRESH_CRON = "0 4 * * *";
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_URL);
+await runMigrations(db);
 const libraryRepository = new DrizzleLibraryRepository(db);
 const metadataCacheRepository = new DrizzleMetadataCacheRepository(db);
 const auth = new AuthService(new DrizzleUserRepository(db), new DrizzleAuthSessionRepository(db));
@@ -48,6 +51,8 @@ const transcodes = new TranscodeManager({
   directory: config.TRANSCODE_DIR,
   accel: hardwareAccel,
   maxConcurrent: config.MAX_CONCURRENT_TRANSCODES,
+  onFallback: (error, plan) =>
+    app.log.warn({ error: error.message, path: plan.path }, `${hardwareAccel.kind} transcode failed; retrying on the CPU`),
 });
 
 const webUiHandler = await loadWebUiHandler();
@@ -56,6 +61,11 @@ const app = buildApp({
   auth,
   libraryRepository,
   metadataProviders,
+  playback: {
+    progressRepository: new DrizzleWatchProgressRepository(db),
+    metadataCache: metadataCacheRepository,
+    transcodes,
+  },
   jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },
   ...(webUiHandler ? { webUiHandler } : {}),
 });

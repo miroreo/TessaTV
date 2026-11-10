@@ -44,14 +44,16 @@ Repo: https://github.com/miroreo/TessaTV (private).
   2124/2125 real library files (the one failure is a genuinely 0-byte file on disk), and
   remux + software transcode + VAAPI transcode all succeed on a representative sample
   (HEVC 8/10-bit, AV1 10-bit + Opus, Hi10P H.264, XviD AVI, PGS-subtitled BluRay) — VAAPI
-  encodes ~1.7–3.5× faster than software with first playlist ready in ~0.4–1.0s. Not yet
-  routed in `apps/server` (see below). `jellyfin-compat` exists with discovery only
+  encodes ~1.7–3.5× faster than software with first playlist ready in ~0.4–1.0s.
+  **Playback, player and watch history are built** (see "Playback, UI and watch history"
+  below) and verified end-to-end in headless Chromium against the real library. `jellyfin-compat` exists with discovery only
   (`/System/Info/Public`, `/System/Ping`); the SvelteKit UI is served by the Node process
   at the root — see the Jellyfin Mobile decision below for why. **Auth is built** (see
   "Auth" below): first-run setup page, login/logout, and every `/api` route locked behind
   a session — verified end-to-end in headless Chromium against a throwaway database.
-  **Next: a playback API + player** (direct play / HLS via `streaming`, Jellyfin Mobile's
-  native player when inside the app, hls.js otherwise). Live client testing is the plan
+  **Next:** deploy to the real server; then a scheduled library scan (imports are still a
+  manual `POST /api/library/import`), and Jellyfin Mobile's native player via
+  `window.NativeShell` (the web player is used inside its web view for now). Live client testing is the plan
   for the compat phase: the dev server's `PORT` was moved to **8080** (still binds
   `0.0.0.0`) specifically so the official Jellyfin iOS app can connect to this machine
   over LAN (`http://10.8.128.8:8080`) or Tailscale (`http://100.97.251.108:8080`) as each
@@ -59,9 +61,7 @@ Repo: https://github.com/miroreo/TessaTV (private).
   updated to match (`/api` → `localhost:8080`). This machine has a real AMD iGPU with
   VAAPI support (`/dev/dri/renderD128`) — the `HardwareAccel` strategy is scoped to
   `none`/`vaapi` for now (actually verifiable here) rather than guessing at NVENC/QSV
-  blind, structured so those slot in later without changing the abstraction. `apps/server`
-  now selects the hardware accel at startup and owns a `TranscodeManager`, but no route
-  uses it yet — that's the playback API above.
+  blind, structured so those slot in later without changing the abstraction.
 - ✅ **Library-first refactor (2026-11-09).** Nine PRs, all merged: pg-boss, zod request
   validation, @fastify/cookie, ky, @ctrl/video-filename-parser, Argon2, execa (short commands),
   shared `/api` types, and a daisyUI UI. This is now a standing rule — see "Library-first"
@@ -173,6 +173,14 @@ What replaced what, and what was deliberately kept:
   *Kept:* plain `spawn` for long-running ffmpeg transcodes, because the session listens to
   the process's events directly, and our own ffmpeg argument builder (fluent-ffmpeg is archived).
 - Shared `/api` types in `packages/domain/src/api.ts`, used by `apps/server` and `apps/web`.
+- Playback file serving: **@fastify/send** (Range, ETag, content-type) instead of hand-rolled
+  Range parsing; probe/subtitle caching: **lru-cache**. Subtitle re-timing after a seek was
+  removed rather than replaced: the browser's own WebVTT parser exposes cues the player
+  shifts directly.
+- Player UI: kept as our own Svelte controls styled with daisyUI (owner's call, 2026-11-09)
+  — they span the whole file and restart the transcode on seeks past the transcoded range,
+  which off-the-shelf players' sliders don't model. A player library (Vidstack, Plyr) is
+  a possible follow-up.
 - UI: rebuilt on **daisyUI 5 + Tailwind v4**.
 
 **Deployment & stack**
@@ -435,6 +443,13 @@ the file from `extractWebVtt`, which reads the whole container (0.3–18s on rea
 its result should be cached. ASS styling and positioning are lost in that conversion. Image
 subtitles (PGS) become `burn-in`, which forces a transcode (`SubtitleBurnInRequired`).
 
+**CPU fallback.** With no usable GPU, `HARDWARE_ACCEL=auto` simply selects software. A GPU
+that passed detection but fails on a particular transcode (driver bug, a file it chokes
+on) is retried on the CPU by `TranscodeManager` — before the client sees anything — and
+that transcode stays on the CPU for its later seeks. Remuxes are never retried: they don't
+use the accel, so the CPU would fail identically. Verified with real ffmpeg against a
+nonexistent render node: playable on the CPU 0.7s later.
+
 Config: `HARDWARE_ACCEL` (`auto`/`none`/`vaapi`), `VAAPI_DEVICE`, `TRANSCODE_DIR`,
 `MAX_CONCURRENT_TRANSCODES`.
 
@@ -452,6 +467,51 @@ target codecs the GPU can't encode are delegated wholesale to the software strat
 real ffmpeg on a lavfi-synthesized 10-bit HEVC + 5.1 AC-3 sample (remux, software
 transcode, and VAAPI transcode when a working device is detected) — it skips when ffmpeg
 isn't on `PATH`, so run tests inside `nix develop`.
+
+### Playback, UI and watch history (built)
+
+`apps/server` routes (all behind login):
+- `GET /api/browse/home` — continue watching, next up, shows, movies; `GET
+  /api/browse/title/:id` — a movie or series with seasons, per-episode progress and `next`
+  (what "play" means). Artwork is read straight from `metadata_cache`, never a provider.
+- `GET /api/playback/:unitId` (duration, audio/subtitle tracks, next episode), `POST
+  .../start {capabilities, startSeconds, audioStreamIndex, subtitleStreamIndex}` →
+  direct-play URL (`.../file`, Range-capable) or an HLS URL under
+  `/api/transcodes/:id/:sessionId/`. The session id is in the path so requests from before
+  a seek get 410 instead of the new run's same-named segments. `POST .../seek
+  {transcodeId, seconds}` keeps or restarts the transcode. Text subtitles are served as
+  WebVTT on the source's timeline; the player moves the browser's parsed cues by the HLS
+  start offset instead of re-parsing WebVTT on the server. Files (direct play and HLS
+  output) go through **@fastify/send** for Range/ETag/content-type, probe and subtitle
+  results through **lru-cache** (`fetch` dedupes concurrent lookups). Request bodies and
+  params are zod schemas; `ClientCapabilities`' schema `satisfies` the TS type.
+- `POST /api/progress/:unitId {positionSeconds, durationSeconds, ended}` — one
+  `watch_progress` row per (user, unit) (migration 0006); ≥90% counts as watched, <30s isn't resumable.
+  `continueWatching`/`nextUp`/`pickNextUnit` live in `packages/library`.
+
+The UI (`/`, `/title/[id]`, `/watch/[unitId]` — names chosen not to collide with Jellyfin
+routes) asks the *browser* what it can decode (`detectCapabilities`: `canPlayType` for
+progressive files and `MediaSource.isTypeSupported` for HLS, only counting a codec both
+accept) and sends that as `ClientCapabilities`. The player has its own controls because a
+transcode's timeline only covers what's been transcoded: its seek bar spans the whole file
+and restarts ffmpeg when seeking past the transcoded range. hls.js plays HLS everywhere
+except Apple browsers (native HLS, needed for AirPlay/iOS fullscreen) — Chromium ≥ ~150
+also claims native HLS, but its demuxer rejects our fMP4 segments. Progress is reported
+every 10s, on pause and on unload, but never before the current stream has actually
+played — otherwise a failed start reports position 0 and wipes the saved resume point.
+At the end of an episode a 10s countdown auto-plays the next one.
+
+Migrations now run at startup (`runMigrations`), so deploying a new version needs no
+manual step; it shares `drizzle-kit migrate`'s bookkeeping table.
+
+### Deployment (Docker)
+
+`docker/docker-compose.yml` runs the app + Postgres. Set `MEDIA_ROOT` (mounted read-only at
+the same path, so import paths match) and the usual `.env`; the compose file overrides
+`DATABASE_URL` for the container network. Uncomment the `devices`/`group_add` block to pass
+`/dev/dri` for VAAPI. Serves on 8096 (Jellyfin's port). The image is Debian 12 (ffmpeg 5.1 +
+Mesa/Intel VA drivers); smoke-tested here with VAAPI, including 4K HDR tone-mapping + PGS
+burn-in at ~2× realtime. Postgres is now bound to `127.0.0.1` only.
 
 ### Jellyfin compatibility layer (not yet built)
 
@@ -572,6 +632,9 @@ pnpm exec turbo watch dev --filter=@tessatv/server --filter=@tessatv/web
 # Build + test everything
 pnpm turbo run build test
 
+# Deploy (after creating .env from .env.example)
+MEDIA_ROOT=/path/to/media docker compose -f docker/docker-compose.yml up -d --build
+
 # Lint — MUST run from the repo root, not per-package (see note below)
 pnpm lint
 
@@ -623,6 +686,13 @@ first-user test skips itself when the dev database already has accounts, rather 
 deleting them.)
 
 ### Non-obvious implementation notes
+
+- The Dockerfile had never built before this (it didn't copy `turbo.json`/
+  `tsconfig.base.json`), and without `.dockerignore` it would also have copied host
+  `node_modules`, build output and `.env` into the image.
+- `nixpkgs#chromium` + `playwright-core` (installed outside the repo) works for UI tests,
+  but only with `LD_LIBRARY_PATH` unset — this machine's environment points it at an
+  alsa-lib built against a newer glibc.
 
 - `eslint-plugin-boundaries` only works when ESLint runs **once from the repo root**
   (`pnpm lint` → `eslint .`). Running it per-package (`eslint src` inside a package

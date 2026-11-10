@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
+    "@fastify/send": "^4.2.1",
     "@tessatv/auth": "workspace:*",
     "@tessatv/config": "workspace:*",
     "@tessatv/domain": "workspace:*",
@@ -24,6 +25,7 @@
     "@tessatv/web": "workspace:*",
     "fastify": "^5.2.0",
     "fastify-type-provider-zod": "^7.0.0",
+    "lru-cache": "^11.5.3",
     "zod": "^4.6.7"
   },
   "devDependencies": {

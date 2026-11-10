@@ -36,3 +36,4 @@ export async function extractWebVtt(
   }
   return result.stdout;
 }
+

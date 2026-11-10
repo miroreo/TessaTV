@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.svelte-kit
+**/build
+**/*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.git
+.claude-tmp

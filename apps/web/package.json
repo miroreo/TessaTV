@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "@sveltejs/adapter-node": "^5.2.11",
-    "@tessatv/domain": "workspace:*"
+    "@tessatv/domain": "workspace:*",
+    "hls.js": "^1.7.4",
+    "@tessatv/streaming": "workspace:*"
   },
   "devDependencies": {
     "@sveltejs/kit": "^2.9.0",

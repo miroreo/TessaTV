@@ -1,15 +1,19 @@
 import type { AuthService } from "@tessatv/auth";
-import type { LibraryRepository } from "@tessatv/domain";
+import type { LibraryRepository, MetadataCacheRepository, WatchProgressRepository } from "@tessatv/domain";
 import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
 import type { MetadataProvidersByKind } from "@tessatv/library";
 import fastifyCookie from "@fastify/cookie";
+import type { TranscodeManager } from "@tessatv/streaming";
 import Fastify, { type FastifyInstance } from "fastify";
 import { hasZodFastifySchemaValidationErrors, validatorCompiler } from "fastify-type-provider-zod";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerBrowseRoutes } from "./routes/browse.js";
+import { Catalog } from "./routes/catalog.js";
 import { registerLibraryImportRoutes } from "./routes/library-import.js";
 import { registerLibraryMergeRoutes } from "./routes/library-merge.js";
 import { registerLibraryMetadataRoutes } from "./routes/library-metadata.js";
 import { registerLibraryRoutes } from "./routes/library.js";
+import { registerPlaybackRoutes, type PlaybackDependencies } from "./routes/playback.js";
 import { type NodeRequestHandler, registerWebUiRoutes } from "./routes/web-ui.js";
 
 export interface AppDependencies {
@@ -22,6 +26,15 @@ export interface AppDependencies {
   auth?: AuthService;
   /** Mounts the Jellyfin-compatible API at the root. Omitted only in tests that don't need it. */
   jellyfin?: JellyfinCompatOptions;
+  /** Browsing, playback and watch progress. These are per-user, so they're only mounted
+   * together with `auth`. */
+  playback?: {
+    progressRepository: WatchProgressRepository;
+    metadataCache: MetadataCacheRepository | null;
+    transcodes: TranscodeManager;
+    probe?: PlaybackDependencies["probe"];
+    extractSubtitles?: PlaybackDependencies["extractSubtitles"];
+  };
   /** SvelteKit's built handler, served at the root for any path no explicit route claims. Omitted when the web app isn't built. */
   webUiHandler?: NodeRequestHandler;
 }
@@ -49,6 +62,13 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   registerLibraryImportRoutes(app, deps.libraryRepository, deps.metadataProviders);
   registerLibraryMetadataRoutes(app, deps.libraryRepository, deps.metadataProviders);
   registerLibraryMergeRoutes(app, deps.libraryRepository, deps.metadataProviders);
+
+  if (deps.auth && deps.playback) {
+    const catalog = new Catalog(deps.playback.metadataCache);
+    const shared = { libraryRepository: deps.libraryRepository, progressRepository: deps.playback.progressRepository, catalog };
+    registerBrowseRoutes(app, shared);
+    registerPlaybackRoutes(app, { ...shared, ...deps.playback });
+  }
 
   if (deps.jellyfin) registerJellyfinCompat(app, deps.jellyfin);
   if (deps.webUiHandler) registerWebUiRoutes(app, deps.webUiHandler);

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HardwareAccel } from "./hardware-accel/hardware-accel.js";
 import { SoftwareAccel } from "./hardware-accel/software.js";
 import type { HlsPlaybackPlan } from "./playback-plan.js";
 import { TranscodeCapacityError, TranscodeManager } from "./transcode-manager.js";
@@ -17,8 +18,16 @@ const PLAN: HlsPlaybackPlan = {
   reasons: ["ContainerNotSupported"],
 };
 
-function fakeSession(outTimeSeconds = 0, state = "running") {
-  return { state, progress: { outTimeSeconds, speed: 1 }, dispose: vi.fn(async () => {}) };
+function fakeSession(outTimeSeconds = 0, state = "running", fails = false) {
+  return {
+    state,
+    progress: { outTimeSeconds, speed: 1 },
+    waitForPlaylist: vi.fn(async () => {
+      if (fails) throw new Error("Transcode failed before producing a playlist");
+      return "index.m3u8";
+    }),
+    dispose: vi.fn(async () => {}),
+  };
 }
 
 describe("TranscodeManager", () => {
@@ -119,5 +128,50 @@ describe("TranscodeManager", () => {
     await transcodes.shutdown();
     expect(sessions.every((session) => session.dispose.mock.calls.length === 1)).toBe(true);
     expect((await readdir(directory)).some((name) => name.includes(stale))).toBe(false);
+  });
+
+  describe("CPU fallback", () => {
+    const gpu = { kind: "vaapi", videoPipeline: () => { throw new Error("unused"); } } as unknown as HardwareAccel;
+    const TRANSCODE_PLAN: HlsPlaybackPlan = {
+      ...PLAN,
+      mode: "transcode",
+      video: { kind: "transcode", streamIndex: 0, source: {} as never, codec: "h264", width: 1280, height: 720, bitrate: 4_000_000 },
+    };
+    const accelsUsed = () => startSession.mock.calls.map((call) => (call[1] as { accel: HardwareAccel }).accel.kind);
+
+    function failingFirst() {
+      let calls = 0;
+      startSession = vi.fn(async () => {
+        const session = fakeSession(0, "running", calls++ === 0);
+        sessions.push(session);
+        return session as unknown as TranscodeSession;
+      });
+    }
+
+    it("retries a failed hardware transcode on the CPU, and keeps the CPU for later seeks", async () => {
+      failingFirst();
+      const onFallback = vi.fn();
+      const transcodes = new TranscodeManager({
+        directory, accel: gpu, onFallback, startSession: startSession as unknown as typeof startTranscodeSession,
+      });
+      const transcode = await transcodes.begin(TRANSCODE_PLAN);
+      expect(accelsUsed()).toEqual(["vaapi", "none"]);
+      expect(sessions[0]!.dispose).toHaveBeenCalled();
+      expect(transcode.session).toBe(sessions[1]);
+      expect(onFallback).toHaveBeenCalledWith(expect.any(Error), TRANSCODE_PLAN);
+
+      await transcodes.seek(transcode.id, 500);
+      expect(accelsUsed()).toEqual(["vaapi", "none", "none"]);
+    });
+
+    it("doesn't retry a remux or a software failure — the CPU would fail the same way", async () => {
+      failingFirst();
+      const remuxing = new TranscodeManager({ directory, accel: gpu, startSession: startSession as unknown as typeof startTranscodeSession });
+      await expect(remuxing.begin(PLAN)).rejects.toThrow(/before producing a playlist/);
+
+      failingFirst();
+      await expect(manager().begin(TRANSCODE_PLAN)).rejects.toThrow(/before producing a playlist/);
+      expect(startSession).toHaveBeenCalledTimes(1);
+    });
   });
 });

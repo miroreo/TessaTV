@@ -3,19 +3,34 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    restart: unless-stopped
     ports:
       - "8096:8096"
     env_file:
       - ../.env
+    environment:
+      # Overrides .env's localhost URL (used for native dev) with the container network name.
+      DATABASE_URL: postgres://tessatv:tessatv@postgres:5432/tessatv
+      PORT: "8096"
+      TRANSCODE_DIR: /transcodes
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - media-library:/data/library
-      - app-cache:/data/cache
+      # Mounted at the same path inside the container as on the host, so the paths you
+      # import (`POST /api/library/import`) are the same in both places.
+      - ${MEDIA_ROOT:?set MEDIA_ROOT to your media directory}:${MEDIA_ROOT}:ro
+      - transcodes:/transcodes
+    # Hardware transcoding: uncomment if the host has /dev/dri (Intel/AMD GPU).
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - video
+    #   - render
 
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: tessatv
       POSTGRES_PASSWORD: tessatv
@@ -23,7 +38,7 @@ services:
     ports:
       # Exposed to the host so `apps/server` can run natively during local dev and still
       # reach this container; the app container itself talks to it as `postgres:5432`.
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -34,5 +49,4 @@ services:
 
 volumes:
   postgres-data:
-  media-library:
-  app-cache:
+  transcodes:

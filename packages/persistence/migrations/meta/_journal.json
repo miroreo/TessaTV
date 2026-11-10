@@ -43,6 +43,13 @@
       "when": 1794238909194,
       "tag": "0005_drop_scheduled_job",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794284841532,
+      "tag": "0006_long_annihilus",
+      "breakpoints": true
     }
   ]
 }

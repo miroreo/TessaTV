@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { HardwareAccel } from "./hardware-accel/hardware-accel.js";
+import { SoftwareAccel } from "./hardware-accel/software.js";
 import type { HlsPlaybackPlan } from "./playback-plan.js";
 import { startTranscodeSession, type TranscodeSession } from "./transcode-session.js";
 
@@ -30,6 +31,15 @@ export interface TranscodeManagerOptions {
   readonly idleTimeoutMs?: number;
   readonly ffmpegPath?: string;
   readonly segmentSeconds?: number;
+  /** How long a session gets to produce its first segment before it counts as failed. */
+  readonly playlistTimeoutMs?: number;
+  /**
+   * Retries a hardware transcode that fails to start on the CPU instead, and keeps using the
+   * CPU for that transcode's later seeks. Defaults to software; `null` disables the retry.
+   */
+  readonly fallbackAccel?: HardwareAccel | null;
+  /** Called when a transcode falls back, e.g. to log why the GPU path failed. */
+  readonly onFallback?: (error: Error, plan: HlsPlaybackPlan) => void;
   /** Test seams. */
   readonly startSession?: typeof startTranscodeSession;
   readonly now?: () => number;
@@ -39,6 +49,7 @@ interface Entry {
   readonly id: string;
   readonly plan: HlsPlaybackPlan;
   session: TranscodeSession;
+  accel: HardwareAccel;
   startTimeSeconds: number;
   lastAccessMs: number;
   generation: number;
@@ -83,14 +94,8 @@ export class TranscodeManager {
     await this.reapIdle();
     this.assertCapacity();
     const id = randomUUID();
-    const entry: Entry = {
-      id,
-      plan,
-      startTimeSeconds,
-      session: await this.spawn(id, 0, plan, startTimeSeconds),
-      lastAccessMs: this.now(),
-      generation: 0,
-    };
+    const { session, accel } = await this.launch(id, 0, plan, startTimeSeconds, this.options.accel);
+    const entry: Entry = { id, plan, startTimeSeconds, session, accel, lastAccessMs: this.now(), generation: 0 };
     this.entries.set(id, entry);
     return entry;
   }
@@ -113,7 +118,9 @@ export class TranscodeManager {
 
     await entry.session.dispose();
     entry.generation += 1;
-    entry.session = await this.spawn(id, entry.generation, entry.plan, seconds);
+    const { session, accel } = await this.launch(id, entry.generation, entry.plan, seconds, entry.accel);
+    entry.session = session;
+    entry.accel = accel;
     entry.startTimeSeconds = seconds;
     return entry;
   }
@@ -148,9 +155,42 @@ export class TranscodeManager {
     return join(this.options.directory, `${SESSION_DIRECTORY_PREFIX}${id}`);
   }
 
-  private spawn(id: string, generation: number, plan: HlsPlaybackPlan, startTimeSeconds: number) {
+  /**
+   * Starts ffmpeg and waits for its first segment, so callers always get a playable session.
+   * A hardware failure (a driver bug, a file the GPU chokes on) is retried on the CPU rather
+   * than surfacing as a playback error.
+   */
+  private async launch(
+    id: string,
+    generation: number,
+    plan: HlsPlaybackPlan,
+    startTimeSeconds: number,
+    accel: HardwareAccel,
+  ): Promise<{ session: TranscodeSession; accel: HardwareAccel }> {
+    const fallback = this.options.fallbackAccel === undefined ? new SoftwareAccel() : this.options.fallbackAccel;
+    const session = await this.spawn(id, generation, plan, startTimeSeconds, accel);
+    try {
+      await session.waitForPlaylist(this.options.playlistTimeoutMs ?? 60_000);
+      return { session, accel };
+    } catch (error) {
+      await session.dispose();
+      // Only a video re-encode uses the accel; a remux failing on the CPU would fail again.
+      if (!fallback || accel.kind === fallback.kind || plan.video?.kind !== "transcode") throw error;
+      this.options.onFallback?.(error as Error, plan);
+      const retry = await this.spawn(id, generation, plan, startTimeSeconds, fallback);
+      try {
+        await retry.waitForPlaylist(this.options.playlistTimeoutMs ?? 60_000);
+      } catch (retryError) {
+        await retry.dispose();
+        throw retryError;
+      }
+      return { session: retry, accel: fallback };
+    }
+  }
+
+  private spawn(id: string, generation: number, plan: HlsPlaybackPlan, startTimeSeconds: number, accel: HardwareAccel) {
     return this.startSession(plan, {
-      accel: this.options.accel,
+      accel,
       directory: join(this.sessionDirectory(id), String(generation)),
       startTimeSeconds,
       ...(this.options.ffmpegPath ? { ffmpegPath: this.options.ffmpegPath } : {}),

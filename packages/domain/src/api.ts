@@ -49,3 +49,82 @@ export interface LibraryNodesResponse {
 export interface UnitsResponse {
   readonly items: readonly Unit[];
 }
+
+/** A movie or series as the UI shows it: library data plus whatever artwork identify cached. */
+export interface TitleSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly mediaType: string;
+  readonly isSeries: boolean;
+  readonly year: number | null;
+  readonly overview: string | null;
+  readonly posterUrl: string | null;
+  readonly backdropUrl: string | null;
+}
+
+export interface UnitProgress {
+  readonly positionSeconds: number;
+  readonly durationSeconds: number | null;
+  readonly completed: boolean;
+}
+
+export interface UnitSummary {
+  readonly id: string;
+  readonly title: string;
+  /** From the unit's sequence path; null for movies. */
+  readonly season: number | null;
+  readonly episode: number | null;
+  readonly playable: boolean;
+  readonly progress: UnitProgress | null;
+}
+
+export interface WatchEntrySummary {
+  readonly unit: UnitSummary;
+  readonly title: TitleSummary;
+}
+
+/** `GET /api/browse/home` */
+export interface HomeResponse {
+  readonly continueWatching: readonly WatchEntrySummary[];
+  readonly nextUp: readonly WatchEntrySummary[];
+  readonly movies: readonly TitleSummary[];
+  readonly shows: readonly TitleSummary[];
+}
+
+/** `GET /api/browse/title/:id` */
+export interface TitleResponse {
+  readonly title: TitleSummary;
+  readonly seasons: readonly { readonly number: number; readonly episodes: readonly UnitSummary[] }[];
+  readonly units: readonly UnitSummary[];
+  /** What "play" starts: the unfinished episode, else the one after the last watched. */
+  readonly next: UnitSummary | null;
+}
+
+export interface StreamOption {
+  readonly index: number;
+  readonly label: string;
+  readonly isDefault: boolean;
+  readonly isForced?: boolean;
+}
+
+/** `GET /api/playback/:unitId` */
+export interface PlaybackInfoResponse {
+  readonly unit: UnitSummary;
+  readonly title: TitleSummary | null;
+  readonly durationSeconds: number | null;
+  readonly audioStreams: readonly StreamOption[];
+  readonly subtitleStreams: readonly StreamOption[];
+  readonly next: UnitSummary | null;
+}
+
+/** `POST /api/playback/:unitId/start` and `.../seek` */
+export interface PlaybackSessionResponse {
+  readonly mode: "direct-play" | "remux" | "transcode";
+  readonly url: string;
+  readonly transcodeId: string | null;
+  /** Where in the source the stream's own time 0 is. Subtitle cues need shifting by this. */
+  readonly startTimeSeconds: number;
+  /** WebVTT on the source's timeline. */
+  readonly subtitleUrl: string | null;
+  readonly reasons: readonly string[];
+}

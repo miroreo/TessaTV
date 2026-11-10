@@ -1,5 +1,7 @@
 import {
   boolean,
+  doublePrecision,
+  index,
   integer,
   bigint,
   jsonb,
@@ -131,4 +133,25 @@ export const authSession = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("auth_session_token_hash").on(table.tokenHash)],
+);
+
+/** One row per (user, unit), overwritten as playback progresses — see `WatchProgress`. */
+export const watchProgress = pgTable(
+  "watch_progress",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUser.id, { onDelete: "cascade" }),
+    unitId: uuid("unit_id")
+      .notNull()
+      .references(() => unit.id, { onDelete: "cascade" }),
+    positionSeconds: doublePrecision("position_seconds").notNull(),
+    durationSeconds: doublePrecision("duration_seconds"),
+    completed: boolean("completed").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.unitId] }),
+    index("watch_progress_user_recent").on(table.userId, table.updatedAt),
+  ],
 );
