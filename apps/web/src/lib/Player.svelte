@@ -82,6 +82,7 @@
   let lastMovedTime = -1;
   let watchdog: ReturnType<typeof setInterval> | undefined;
   let statsOpen = $state(false);
+  let lastFragment = $state<{ bytes: number; ms: number } | null>(null);
   /**
    * The browser refused to start playback on its own: Firefox blocks audible autoplay on a
    * page that hasn't been clicked yet (a new tab, a reload), and some Gecko forks ask for a
@@ -258,6 +259,9 @@
       video.src = next.url;
     } else {
       hls = new Hls({ startPosition: streamSeconds, maxBufferLength: 60 });
+      hls.on(Hls.Events.FRAG_LOADED, (_event, { frag }) => {
+        lastFragment = { bytes: frag.stats.loaded, ms: frag.stats.loading.end - frag.stats.loading.start };
+      });
       hls.on(Hls.Events.ERROR, (_event, details) => {
         if (!details.fatal) return;
         // hls.js's documented recovery for a decode error, before giving up on the stream.
@@ -687,6 +691,7 @@
       {muted}
       normalizationDb={normalizationGain !== 1 && info.normalization ? info.normalization.gainDb : null}
       {fallbacks}
+      {lastFragment}
       onclose={() => (statsOpen = false)}
     />
   {/if}

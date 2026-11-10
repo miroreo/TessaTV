@@ -10,7 +10,7 @@ const ENCODER_ARGS: Record<TranscodeVideoCodec, readonly string[]> = {
 
 /** The CPU's marketing name (e.g. `AMD Ryzen 7 7840HS w/ Radeon 780M Graphics`), as the kernel reports it. */
 export function cpuModel(): string | null {
-  return cpus()[0]?.model.trim() || null;
+  return cpus()[0]?.model.replace(/\s+/g, " ").trim() || null;
 }
 
 /** CPU decode + encode. Always available; also the fallback other strategies delegate to. */

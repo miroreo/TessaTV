@@ -511,6 +511,38 @@ every 10s, on pause and on unload, but never before the current stream has actua
 played — otherwise a failed start reports position 0 and wipes the saved resume point.
 At the end of an episode a 10s countdown auto-plays the next one.
 
+**Always a playable stream (fallback ladder).** Capability detection can be wrong (a
+browser claims a codec it can't decode, a file has a codec detail no check sees), and
+ffmpeg can fail on a damaged file, so instead of failing playback steps down a
+`FallbackLevel` (`packages/streaming/src/playback-plan.ts`): **0** the normal plan → **1**
+re-encode everything to H.264 8-bit + stereo AAC in MPEG-TS (no direct play, no stream
+copy) → **2** also CPU-only, with ffmpeg told to push through corrupt input (`-fflags
++genpts+discardcorrupt -err_detect ignore_err -max_error_rate 1`) → **3** also ≤720p and no
+burned-in subtitles, and the GPU gets another try (a 4K HEVC source can't be decoded in
+realtime on the CPU: measured 0.28× at level 2 for a 4K HDR remux, vs 0.96× at 720p). The
+server steps down by itself when ffmpeg can't produce a first segment (`POST .../start`
+takes `fallbackLevel` and answers with the level it reached; 422 only when level 3 fails
+too; 503 for capacity is never retried). The player steps down when the browser can't
+decode (a media error on direct play / native HLS; an hls.js fatal error after its own
+`recoverMediaError` + `swapAudioCodec` tries), when a seek's restart fails (502), when the
+position hasn't moved for 20s while it should be playing, or when 4s of playback produced
+no picture. Within a player the level only goes up. Verified in Firefox: an AVI wrongly
+offered for direct play failed with "Failed to init decoder" and was playing a level-1
+transcode 3s after opening.
+
+**Stats for nerds** (admins only: the chart button or `i` in the player): browser-side
+numbers (resolution, dropped frames, buffer, hls.js bandwidth and last segment download,
+volume and normalization gain, every fallback step) plus `GET
+/api/playback/:unitId/stats?transcodeId=` (`requireAdmin`): the file, source streams, the
+plan and its reasons, output codecs, ffmpeg state and speed, how far ahead it's transcoded,
+and where video is decoded and encoded on what device — the GPU's name comes from libva's
+`VAAPI driver:` line at startup (`parseVaapiDriverName`), the CPU's from `os.cpus()`.
+
+**Autoplay can be refused.** Firefox blocks audible autoplay on a page that hasn't been
+clicked yet (a new tab, a reload, the full reload SvelteKit does after a rebuild), and some
+Gecko forks require a click per play; `play()` then rejects with `NotAllowedError`. The
+player shows a large play button in that case rather than sitting silently paused.
+
 **Volume normalization** (on by default, toggle in the player, remembered per browser):
 the `loudness-scan` job (pg-boss, every 15 min, ≤10 min per run so it fits pg-boss's job
 expiry) measures each file's default audio stream with ffmpeg's `ebur128` filter (EBU R128 /

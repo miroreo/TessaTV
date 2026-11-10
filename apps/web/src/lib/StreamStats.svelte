@@ -11,7 +11,7 @@
   import type { PlaybackSessionResponse, PlaybackStatsResponse } from "@tessatv/domain";
   import { api, formatTime } from "$lib/api.js";
   import Icon from "$lib/Icon.svelte";
-  import Hls from "hls.js";
+  import type Hls from "hls.js";
   import { onDestroy } from "svelte";
 
   /**
@@ -30,6 +30,7 @@
     muted,
     normalizationDb,
     fallbacks,
+    lastFragment,
     onclose,
   }: {
     unitId: string;
@@ -44,6 +45,8 @@
     /** Gain normalization is applying, or null when it isn't. */
     normalizationDb: number | null;
     fallbacks: readonly FallbackEvent[];
+    /** The most recent HLS segment download, tracked by the player since the stream started. */
+    lastFragment: { bytes: number; ms: number } | null;
     onclose: () => void;
   } = $props();
 
@@ -53,7 +56,6 @@
   let server = $state<PlaybackStatsResponse | null>(null);
   let serverError = $state<string | null>(null);
   let client = $state({ width: 0, height: 0, dropped: 0, total: 0, buffer: 0, viewport: "" });
-  let lastFragment = $state<{ bytes: number; ms: number } | null>(null);
   let bandwidth = $state<number | null>(null);
 
   async function pollServer() {
@@ -95,17 +97,6 @@
   const clientTimer = setInterval(pollClient, CLIENT_POLL_MS);
   onDestroy(() => clearInterval(clientTimer));
 
-  $effect(() => {
-    if (!hls) return;
-    const instance = hls;
-    const onFragment = (_event: string, data: { frag: { stats: { loaded: number; loading: { start: number; end: number } } } }) => {
-      const { loaded, loading } = data.frag.stats;
-      lastFragment = { bytes: loaded, ms: loading.end - loading.start };
-    };
-    instance.on(Hls.Events.FRAG_LOADED, onFragment);
-    return () => instance.off(Hls.Events.FRAG_LOADED, onFragment);
-  });
-
   const megabits = (bits: number | null | undefined) => (bits ? `${(bits / 1_000_000).toFixed(1)} Mbps` : "—");
   const bytes = (count: number | null | undefined) =>
     !count ? "—" : count > 1e9 ? `${(count / 1e9).toFixed(2)} GB` : `${(count / 1e6).toFixed(1)} MB`;
@@ -115,7 +106,9 @@
     const transcode = server?.transcode ?? null;
     const source = server?.sourceVideo;
     const audio = server?.sourceAudio;
+    // Only shown when the playlist declares codecs; ffmpeg's don't, and the output rows cover it.
     const level = hls?.levels[hls.currentLevel];
+    const streamCodecs = level?.videoCodec || level?.audioCodec ? `${level.videoCodec ?? "—"} / ${level.audioCodec ?? "—"}` : null;
     const out: [string, string][] = [
       ["Unit", unitId],
       ["Mode", session ? `${session.mode}${session.reasons.length ? ` (${session.reasons.join(", ")})` : ""}` : "—"],
@@ -123,7 +116,7 @@
       ["Player", engine],
       ["Viewport / Frames", `${client.viewport} / ${client.dropped} dropped of ${client.total}`],
       ["Current res", client.width ? `${client.width}×${client.height}` : "no picture"],
-      ["Codecs (stream)", level ? `${level.videoCodec ?? "—"} / ${level.audioCodec ?? "—"}` : "—"],
+      ...(streamCodecs ? ([["Codecs (stream)", streamCodecs]] as [string, string][]) : []),
       ["Volume / Normalized", `${muted ? "muted" : `${Math.round(volume * 100)}%`} / ${normalizationDb === null ? "off" : `${normalizationDb > 0 ? "+" : ""}${normalizationDb} dB`}`],
       ["Buffer health", `${client.buffer.toFixed(2)} s`],
       ["Connection speed", bandwidth ? `${Math.round(bandwidth / 1000)} Kbps` : "—"],
