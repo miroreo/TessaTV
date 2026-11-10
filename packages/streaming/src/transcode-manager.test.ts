@@ -132,7 +132,11 @@ describe("TranscodeManager", () => {
   });
 
   describe("CPU fallback", () => {
-    const gpu = { kind: "vaapi", videoPipeline: () => { throw new Error("unused"); } } as unknown as HardwareAccel;
+    const gpu: HardwareAccel = {
+      kind: "vaapi",
+      deviceName: "Test GPU",
+      videoPipeline: (request) => ({ ...new SoftwareAccel().videoPipeline(request), decode: "hardware", encode: "hardware" }),
+    };
     const TRANSCODE_PLAN: HlsPlaybackPlan = {
       ...PLAN,
       mode: "transcode",
@@ -170,11 +174,13 @@ describe("TranscodeManager", () => {
       });
     });
 
-    it("skips the GPU from fallback level 2", async () => {
+    it("skips the GPU at fallback level 2, and tries it again at the lower resolution of level 3", async () => {
       const transcodes = new TranscodeManager({ directory, accel: gpu, startSession: startSession as unknown as typeof startTranscodeSession });
       const transcode = await transcodes.begin({ ...TRANSCODE_PLAN, fallbackLevel: 2 });
       expect(accelsUsed()).toEqual(["none"]);
       expect(transcode.hardwareError).toBeNull();
+      await transcodes.begin({ ...TRANSCODE_PLAN, fallbackLevel: 3 });
+      expect(accelsUsed()).toEqual(["none", "vaapi"]);
     });
 
     it("doesn't retry a remux or a software failure — the CPU would fail the same way", async () => {

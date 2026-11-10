@@ -126,8 +126,9 @@ export class TranscodeManager {
     await this.reapIdle();
     this.assertCapacity();
     const id = randomUUID();
-    // From fallback level 2 the GPU is skipped outright: the previous levels may have failed on it.
-    const initial = plan.fallbackLevel >= 2 ? (this.fallback ?? this.options.accel) : this.options.accel;
+    // Level 2 skips the GPU outright, since the previous levels may have failed on it; level 3
+    // lowers the resolution instead, and tries it again (see `FallbackLevel`).
+    const initial = plan.fallbackLevel === 2 ? (this.fallback ?? this.options.accel) : this.options.accel;
     const { session, accel, hardwareError } = await this.launch(id, 0, plan, startTimeSeconds, initial);
     const entry: Entry = {
       id,

@@ -82,6 +82,12 @@
   let lastMovedTime = -1;
   let watchdog: ReturnType<typeof setInterval> | undefined;
   let statsOpen = $state(false);
+  /**
+   * The browser refused to start playback on its own: Firefox blocks audible autoplay on a
+   * page that hasn't been clicked yet (a new tab, a reload), and some Gecko forks ask for a
+   * click per play. Shown as a big play button rather than a silently paused player.
+   */
+  let autoplayBlocked = $state(false);
 
   let audioIndex = $state<number | null>(null);
   let subtitleIndex = $state<number | null>(null);
@@ -240,7 +246,10 @@
       video.currentTime = streamSeconds;
       // A new source resets the rate; volume survives on the element.
       video.playbackRate = rate;
-      void video.play().catch(() => (paused = true));
+      void video.play().catch((cause: DOMException) => {
+        paused = true;
+        if (cause.name === "NotAllowedError") autoplayBlocked = true;
+      });
     };
     video.addEventListener("loadedmetadata", seekWhenReady, { once: true });
 
@@ -601,7 +610,10 @@
       streamTime = video.currentTime;
       if (!video.paused) reportProgress();
     }}
-    onplay={() => (paused = false)}
+    onplay={() => {
+      paused = false;
+      autoplayBlocked = false;
+    }}
     onpause={() => {
       paused = true;
       reportProgress(true);
@@ -631,7 +643,17 @@
     {/if}
   </video>
 
-  {#if loading || buffering}
+  {#if autoplayBlocked && paused && !error}
+    <button
+      type="button"
+      class="btn btn-warning btn-circle absolute top-1/2 left-1/2 size-20 -translate-1/2"
+      onclick={() => void video.play()}
+      aria-label="Play"
+      title="Play (k)"
+    >
+      <Icon name="play" class="size-10" />
+    </button>
+  {:else if loading || buffering}
     <span class="loading loading-spinner loading-lg pointer-events-none absolute top-1/2 left-1/2 -translate-1/2" aria-label="Loading"></span>
   {/if}
 

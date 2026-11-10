@@ -62,6 +62,9 @@ export type SubtitleAction =
  *   stream copy, which is where a codec detail the capability check can't see bites.
  * - 2: also CPU-only, and ffmpeg pushes through corrupt input instead of failing.
  * - 3: also at most 720p, and without burned-in subtitles (the most fragile filter graph).
+ *   The GPU gets another chance here (still falling back to the CPU if it fails to start):
+ *   a 4K HEVC source can't be decoded in realtime on most CPUs, so a stream that stalled on
+ *   the CPU at level 2 would stall again.
  */
 export type FallbackLevel = 0 | 1 | 2 | 3;
 export const MAX_FALLBACK_LEVEL: FallbackLevel = 3;
