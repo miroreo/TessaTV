@@ -8,6 +8,8 @@ import type {
   LibraryNode,
   LibraryRepository,
   MediaFile,
+  ServerSettings,
+  ServerSettingsRepository,
   Unit,
   User,
   UserRepository,
@@ -70,6 +72,17 @@ class InMemoryProgress implements WatchProgressRepository {
   }
 }
 
+class InMemorySettings implements ServerSettingsRepository {
+  settings: ServerSettings = { maxStreamHeight: null };
+  async get() {
+    return this.settings;
+  }
+  async update(changes: Partial<ServerSettings>) {
+    this.settings = { ...this.settings, ...changes };
+    return this.settings;
+  }
+}
+
 const NOW = new Date(0);
 const node = (id: string, kind: LibraryNode["kind"], parentId: string | null, mediaType: string): LibraryNode => ({
   id, kind, parentId, mediaType, title: id, sortTitle: id, sourceKey: id, externalIds: [],
@@ -129,6 +142,7 @@ describe("browse, playback and progress routes", () => {
   let app: ReturnType<typeof buildApp>;
   let headers: { authorization: string };
   const progress = new InMemoryProgress();
+  const settings = new InMemorySettings();
   const transcodeDir = () => join(root, "hls");
 
   beforeAll(async () => {
@@ -167,6 +181,7 @@ describe("browse, playback and progress routes", () => {
     const { token } = await auth.completeSetup("viewer", "a-long-enough-password", null);
     headers = { authorization: `Bearer ${token}` };
     app = buildApp({
+      settings,
       libraryRepository: library,
       metadataProviders: {},
       auth,
@@ -255,6 +270,25 @@ describe("browse, playback and progress routes", () => {
     });
     const directPlay = (await app.inject({ method: "GET", url: "/api/playback/film/stats", headers })).json();
     expect(directPlay.transcode).toBeNull();
+  });
+
+  it("caps every stream at the admin's maximum resolution, transcoding a file that would direct play", async () => {
+    const patched = await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: 480 } });
+    expect(patched.json()).toEqual({ maxStreamHeight: 480 });
+    try {
+      const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
+      expect(started.json()).toMatchObject({ mode: "transcode", reasons: ["VideoResolutionNotSupported"] });
+      const { transcode } = (
+        await app.inject({ method: "GET", url: `/api/playback/film/stats?transcodeId=${started.json().transcodeId}`, headers })
+      ).json();
+      expect(transcode.video).toMatchObject({ action: "transcode", width: 854, height: 480 });
+    } finally {
+      await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: null } });
+    }
+    expect((await app.inject({ method: "GET", url: "/api/settings", headers })).json()).toEqual({ maxStreamHeight: null });
+    expect((await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: 999 } })).statusCode).toBe(400);
+    const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
+    expect(started.json()).toMatchObject({ mode: "direct-play" });
   });
 
   it("rejects missing capabilities and refuses to serve arbitrary transcode files", async () => {

@@ -13,6 +13,7 @@ import {
   DrizzleLibraryFolderRepository,
   DrizzleLoudnessRepository,
   DrizzleMediaAvailabilityRepository,
+  DrizzleServerSettingsRepository,
   DrizzleWatchProgressRepository,
   runMigrations,
 } from "@tessatv/persistence";
@@ -84,6 +85,7 @@ const app = buildApp({
     availability,
   },
   libraryFolders: { folders: libraryFolders, scanner },
+  settings: new DrizzleServerSettingsRepository(db),
   jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },
   ...(webUiHandler ? { webUiHandler } : {}),
 });

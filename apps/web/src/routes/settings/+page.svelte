@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { LibraryFolderSummary, LibraryScanStatus } from "@tessatv/domain";
+  import { MAX_STREAM_HEIGHTS, type LibraryFolderSummary, type LibraryScanStatus, type MaxStreamHeight, type ServerSettings } from "@tessatv/domain";
   import { invalidateAll } from "$app/navigation";
   import { api } from "$lib/api.js";
   import Icon from "$lib/Icon.svelte";
@@ -56,6 +56,32 @@
     }, 1500);
   }
 
+  let maxStreamHeight = $state<MaxStreamHeight | null>(null);
+  let savingSettings = $state(false);
+  let settingsSaved = $state(false);
+  let settingsError = $state<string | null>(null);
+  $effect.pre(() => {
+    maxStreamHeight = data.settings.maxStreamHeight;
+  });
+
+  const HEIGHT_LABEL: Record<MaxStreamHeight, string> = { 2160: "4K (2160p)", 1440: "1440p", 1080: "1080p", 720: "720p", 480: "480p" };
+
+  async function saveMaxStreamHeight(event: Event) {
+    (event.currentTarget as HTMLElement).blur();
+    savingSettings = true;
+    settingsSaved = false;
+    settingsError = null;
+    try {
+      const saved = await api<ServerSettings>(fetch, "/api/settings", { method: "PATCH", body: JSON.stringify({ maxStreamHeight }) });
+      maxStreamHeight = saved.maxStreamHeight;
+      settingsSaved = true;
+    } catch (cause) {
+      settingsError = (cause as Error).message;
+    } finally {
+      savingSettings = false;
+    }
+  }
+
   function when(iso: string): string {
     return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   }
@@ -66,6 +92,32 @@
 </svelte:head>
 
 <h1 class="mb-6 text-2xl font-bold">Settings</h1>
+
+<section class="card bg-base-200 mb-6">
+  <div class="card-body">
+    <h2 class="card-title">Playback</h2>
+    <label class="flex flex-wrap items-center gap-3">
+      <span>Maximum resolution</span>
+      <select class="select w-auto" bind:value={maxStreamHeight} onchange={saveMaxStreamHeight} disabled={savingSettings} aria-label="Maximum resolution">
+        <option value={null}>Original (no limit)</option>
+        {#each MAX_STREAM_HEIGHTS as height (height)}
+          <option value={height}>{HEIGHT_LABEL[height]}</option>
+        {/each}
+      </select>
+      {#if savingSettings}
+        <span class="loading loading-spinner loading-sm"></span>
+      {:else if settingsSaved}
+        <span class="text-success flex items-center gap-1 text-sm"><Icon name="check" class="size-4" /> Saved</span>
+      {/if}
+    </label>
+    <p class="text-sm opacity-70">
+      No stream is sent taller than this, on any device. A taller file is transcoded down instead of played as-is — which also
+      keeps 4K HDR files from transcoding at full size, the slowest thing this server does. Applies from the next time a video
+      starts.
+    </p>
+    {#if settingsError}<div class="alert alert-error">{settingsError}</div>{/if}
+  </div>
+</section>
 
 <section class="card bg-base-200 mb-6">
   <div class="card-body">

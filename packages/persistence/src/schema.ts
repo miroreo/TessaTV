@@ -186,3 +186,13 @@ export const libraryFolder = pgTable(
   },
   (table) => [uniqueIndex("library_folder_path").on(table.path)],
 );
+
+/**
+ * Admin settings as key/value rows (see `ServerSettings`), so adding a setting needs no
+ * migration. Values are validated when read; a missing or unrecognised one means the default.
+ */
+export const serverSetting = pgTable("server_setting", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

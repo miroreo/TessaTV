@@ -10,6 +10,7 @@ import {
   type PlaybackInfoResponse,
   type PlaybackSessionResponse,
   type PlaybackStatsResponse,
+  type ServerSettingsRepository,
   type Unit,
   type WatchProgressRepository,
 } from "@tessatv/domain";
@@ -39,6 +40,8 @@ export interface PlaybackDependencies {
   readonly progressRepository: WatchProgressRepository;
   readonly catalog: Catalog;
   readonly transcodes: TranscodeManager;
+  /** The admin's stream resolution cap; without it, streams are uncapped. */
+  readonly settings?: ServerSettingsRepository;
   /** Optional so a deployment without the scan job simply plays unlevelled audio. */
   readonly loudnessRepository?: LoudnessRepository;
   /** Test seams. */
@@ -196,7 +199,7 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
     unitId: string,
     media: MediaProbe,
     capabilities: ClientCapabilities,
-    options: { startSeconds: number; audioStreamIndex?: number; subtitleStreamIndex?: number },
+    options: { startSeconds: number; audioStreamIndex?: number; subtitleStreamIndex?: number; maxHeight?: number },
     level: FallbackLevel,
   ): Promise<PlaybackSessionResponse> {
     let lastError: Error | null = null;
@@ -206,6 +209,7 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
         plan = resolvePlaybackPlan(media, capabilities, {
           ...(options.audioStreamIndex !== undefined ? { audioStreamIndex: options.audioStreamIndex } : {}),
           ...(options.subtitleStreamIndex !== undefined ? { subtitleStreamIndex: options.subtitleStreamIndex } : {}),
+          ...(options.maxHeight !== undefined ? { maxHeight: options.maxHeight } : {}),
           fallbackLevel: current,
         });
       } catch (error) {
@@ -299,6 +303,7 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       if (!playable) return reply.code(404).send({ error: "not_found" });
       const media = await probeOr404(playable.file, reply);
       if (!media) return reply;
+      const maxHeight = (await deps.settings?.get())?.maxStreamHeight ?? undefined;
       try {
         return await startStream(
           playable.unit.id,
@@ -308,6 +313,7 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
             startSeconds: startSeconds ?? 0,
             ...(audioStreamIndex !== undefined ? { audioStreamIndex } : {}),
             ...(subtitleStreamIndex !== undefined ? { subtitleStreamIndex } : {}),
+            ...(maxHeight !== undefined ? { maxHeight } : {}),
           },
           request.body.fallbackLevel ?? 0,
         );

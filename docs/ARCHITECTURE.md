@@ -538,6 +538,14 @@ plan and its reasons, output codecs, ffmpeg state and speed, how far ahead it's 
 and where video is decoded and encoded on what device — the GPU's name comes from libva's
 `VAAPI driver:` line at startup (`parseVaapiDriverName`), the CPU's from `os.cpus()`.
 
+**Maximum resolution** (admin Settings page, "Playback"): `ServerSettings.maxStreamHeight`
+(2160/1440/1080/720/480 or no limit) caps every stream: `POST .../start` passes it to
+`resolvePlaybackPlan` as `maxHeight`, so a taller file is transcoded down instead of played
+as-is (reason `VideoResolutionNotSupported`). Settings are key/value rows in
+`server_setting` (migration 0012; `GET`/`PATCH /api/settings`, admin-only), validated
+when read so a retired or out-of-range value falls back to the default rather than
+breaking playback. Read on every start, so a change applies from the next video.
+
 **Autoplay can be refused.** Firefox blocks audible autoplay on a page that hasn't been
 clicked yet (a new tab, a reload, the full reload SvelteKit does after a rebuild), and some
 Gecko forks require a click per play; `play()` then rejects with `NotAllowedError`. The

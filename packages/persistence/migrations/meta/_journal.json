@@ -85,6 +85,13 @@
       "when": 1794337562138,
       "tag": "0011_sticky_watched",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794344202169,
+      "tag": "0012_server_settings",
+      "breakpoints": true
     }
   ]
 }

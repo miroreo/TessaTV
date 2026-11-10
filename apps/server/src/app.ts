@@ -4,6 +4,7 @@ import type {
   LoudnessRepository,
   MediaAvailabilityRepository,
   MetadataCacheRepository,
+  ServerSettingsRepository,
   WatchProgressRepository,
 } from "@tessatv/domain";
 import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
@@ -21,6 +22,7 @@ import { registerLibraryMergeRoutes } from "./routes/library-merge.js";
 import { registerLibraryMetadataRoutes } from "./routes/library-metadata.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerPlaybackRoutes, type PlaybackDependencies } from "./routes/playback.js";
+import { registerServerSettingsRoutes } from "./routes/server-settings.js";
 import { type NodeRequestHandler, registerWebUiRoutes } from "./routes/web-ui.js";
 
 export interface AppDependencies {
@@ -45,6 +47,8 @@ export interface AppDependencies {
     probe?: PlaybackDependencies["probe"];
     extractSubtitles?: PlaybackDependencies["extractSubtitles"];
   };
+  /** Server-wide settings (admin-only routes, mounted with `auth`); playback applies them. */
+  settings?: ServerSettingsRepository;
   /** Library folder settings and scanning; admin-only routes, mounted together with `auth`. */
   libraryFolders?: LibraryFolderDependencies;
   /** SvelteKit's built handler, served at the root for any path no explicit route claims. Omitted when the web app isn't built. */
@@ -79,10 +83,11 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
     const catalog = new Catalog(deps.playback.metadataCache);
     const shared = { libraryRepository: deps.libraryRepository, progressRepository: deps.playback.progressRepository, catalog };
     registerBrowseRoutes(app, { ...shared, ...(deps.playback.availability ? { availability: deps.playback.availability } : {}) });
-    registerPlaybackRoutes(app, { ...shared, ...deps.playback });
+    registerPlaybackRoutes(app, { ...shared, ...deps.playback, ...(deps.settings ? { settings: deps.settings } : {}) });
   }
 
   if (deps.auth && deps.libraryFolders) registerLibraryFolderRoutes(app, deps.libraryFolders);
+  if (deps.auth && deps.settings) registerServerSettingsRoutes(app, deps.settings);
 
   if (deps.jellyfin) registerJellyfinCompat(app, deps.jellyfin);
   if (deps.webUiHandler) registerWebUiRoutes(app, deps.webUiHandler);
