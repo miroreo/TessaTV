@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     MAX_STREAM_HEIGHTS,
+    type JellyfinImportResponse,
     type LibraryFolderSummary,
     type LibraryScanStatus,
     type MaxStreamHeight,
@@ -145,6 +146,48 @@
     }
   }
 
+  /** Watch history import: the Jellyfin address and API key, then a run that reports per person. */
+  const savedJellyfin = $derived(data.settings.jellyfin);
+  let jellyfin = $state({ url: "", apiKey: "" });
+  $effect.pre(() => {
+    jellyfin = { url: savedJellyfin?.url ?? "", apiKey: "" };
+  });
+  let savingJellyfin = $state(false);
+  let importing = $state(false);
+  let jellyfinMessage = $state<{ ok: boolean; text: string } | null>(null);
+  let importReport = $state<JellyfinImportResponse | null>(null);
+
+  async function saveJellyfin(event: SubmitEvent) {
+    event.preventDefault();
+    savingJellyfin = true;
+    jellyfinMessage = null;
+    try {
+      await api<ServerSettingsResponse>(fetch, "/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ jellyfin: { url: jellyfin.url, ...(jellyfin.apiKey ? { apiKey: jellyfin.apiKey } : {}) } }),
+      });
+      await invalidateAll();
+      jellyfinMessage = { ok: true, text: "Connected and saved." };
+    } catch (cause) {
+      jellyfinMessage = { ok: false, text: (cause as Error).message };
+    } finally {
+      savingJellyfin = false;
+    }
+  }
+
+  async function runImport() {
+    importing = true;
+    jellyfinMessage = null;
+    importReport = null;
+    try {
+      importReport = await api<JellyfinImportResponse>(fetch, "/api/jellyfin/import", { method: "POST" });
+    } catch (cause) {
+      jellyfinMessage = { ok: false, text: (cause as Error).message };
+    } finally {
+      importing = false;
+    }
+  }
+
   function when(iso: string): string {
     return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   }
@@ -241,6 +284,60 @@
         {/if}
       </div>
     </form>
+  </div>
+</section>
+
+<section class="card bg-base-200 mb-6">
+  <div class="card-body">
+    <h2 class="card-title">Import from Jellyfin</h2>
+    <p class="text-sm opacity-70">
+      Copies everyone's watched marks and resume positions from a Jellyfin server onto the TessaTV accounts with the same username.
+      People who don't have an account yet get theirs the first time they sign in. It only adds to what's here — newer wins, nothing is
+      removed — so it's safe to run again. Make an API key under Jellyfin's Dashboard → API Keys.
+    </p>
+    <form class="grid gap-3 sm:grid-cols-2" onsubmit={saveJellyfin}>
+      <label class="floating-label">
+        <span>Jellyfin address</span>
+        <input class="input w-full font-mono" placeholder="http://jellyfin.lan:8096" bind:value={jellyfin.url} required />
+      </label>
+      <label class="floating-label">
+        <span>API key</span>
+        <input
+          class="input w-full font-mono"
+          type="password"
+          autocomplete="off"
+          placeholder={savedJellyfin?.hasApiKey ? "Saved — leave blank to keep" : ""}
+          required={!savedJellyfin?.hasApiKey}
+          bind:value={jellyfin.apiKey}
+        />
+      </label>
+      <div class="col-span-full flex flex-wrap items-center gap-3">
+        <button class="btn btn-warning" type="submit" disabled={savingJellyfin}>{savingJellyfin ? "Connecting…" : "Save"}</button>
+        <button class="btn" type="button" onclick={runImport} disabled={importing || !savedJellyfin}>
+          {importing ? "Importing…" : "Import watch history"}
+        </button>
+        {#if jellyfinMessage}
+          <span class="text-sm {jellyfinMessage.ok ? 'text-success' : 'text-error'}">{jellyfinMessage.text}</span>
+        {/if}
+      </div>
+    </form>
+    {#if importReport}
+      <ul class="list">
+        {#each importReport.users as person (person.username)}
+          <li class="list-row items-center">
+            <div class="list-col-grow">{person.username}</div>
+            <div class="text-sm opacity-70">
+              {person.matched} matched{person.unmatched ? `, ${person.unmatched} not in this library` : ""}
+            </div>
+            <span class="badge badge-sm {person.outcome === 'imported' ? 'badge-success' : 'badge-ghost'}">
+              {person.outcome === "imported" ? "Imported" : "Waiting for sign-in"}
+            </span>
+          </li>
+        {:else}
+          <li class="list-row text-sm opacity-70">That server has no users.</li>
+        {/each}
+      </ul>
+    {/if}
   </div>
 </section>
 

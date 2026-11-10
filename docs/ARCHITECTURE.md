@@ -709,6 +709,30 @@ restart or env var is involved:
    optionally a group that's required to sign in at all. Save; the login page now shows
    the button.
 
+### Jellyfin watch-history import (built)
+
+Settings → *Import from Jellyfin* saves a Jellyfin address and API key (`server_setting`
+key `jellyfin`; the key is sealed with `SecretBox` like the OIDC secret and never returned;
+saving checks it by listing users, 422 `jellyfin_unreachable` otherwise). `POST
+/api/jellyfin/import` (admin, one run at a time) runs `packages/jellyfin-import`:
+- **Source**: the official `@jellyfin/sdk` behind a small `JellyfinHistorySource`
+  interface (tests fake it). Per user, two filtered `/Items` queries (`IsPlayed`,
+  `IsResumable`), not the whole library. The SDK's type declarations omit file extensions,
+  so this package alone compiles with `moduleResolution: Bundler`; its emitted JS is plain ESM.
+- **Matching a Jellyfin item to a unit** (`match.ts`): file path first — exact, else the
+  longest shared trailing path if it's unique, so a different mount point (`/media` vs
+  `/data/tessatv`) works — then the series' provider id (`tvdb`, `tmdb`, `imdb`) plus
+  season and episode numbers, or the movie's own id. Ambiguity means no match; the import
+  reports how many items weren't matched. `LibraryRepository.listUnitLocations` supplies
+  every unit's path and its own and ancestors' external ids.
+- **People**: matched to TessaTV accounts by username (case-insensitive). History for a
+  Jellyfin user with no account goes into `held_watch_history` (migration 0014) and is
+  moved into their real history by `claimHeldHistory` the first time they sign in through
+  SSO (`SsoDependencies.onAccountCreated`).
+- **Merge rules** (`importHistory`): an imported row replaces the stored position only if
+  its `updatedAt` is newer; `watched_at` only moves forward. Nothing is ever deleted, so
+  re-running is safe and never undoes what someone watched here since.
+
 ### Jobs (done — metadata refresh; more job types come with acquisition)
 
 `packages/jobs`' `JobScheduler` wraps pg-boss: each registered `JobDefinition` (`name`,
