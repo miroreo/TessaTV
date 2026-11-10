@@ -13,13 +13,22 @@ declare module "fastify" {
 }
 
 /** `/api` routes reachable without a session: enough to run first-run setup and log in. */
-const PUBLIC_API_ROUTES = new Set(["/api/auth/session", "/api/auth/setup", "/api/auth/login", "/api/auth/logout"]);
+const PUBLIC_API_ROUTES = new Set([
+  "/api/auth/session",
+  "/api/auth/setup",
+  "/api/auth/login",
+  "/api/auth/logout",
+  "/api/auth/oidc/login",
+  "/api/auth/oidc/callback",
+]);
 
 const ERROR_STATUS: Record<AuthErrorCode, number> = {
   setup_already_completed: 409,
   invalid_username: 400,
   weak_password: 400,
   invalid_credentials: 401,
+  not_in_required_group: 403,
+  username_taken: 409,
 };
 
 const credentialsSchema = { body: z.object({ username: z.string(), password: z.string() }) };
@@ -33,7 +42,15 @@ async function sendAuthError(reply: FastifyReply, error: unknown) {
   return reply.code(ERROR_STATUS[error.code]).send({ error: error.code, message: error.message });
 }
 
-export function registerAuthRoutes(server: FastifyInstance, auth: AuthService): void {
+/**
+ * `ssoButtonLabel` resolves to the login page's SSO button text, or null when single
+ * sign-on is off.
+ */
+export function registerAuthRoutes(
+  server: FastifyInstance,
+  auth: AuthService,
+  ssoButtonLabel: () => Promise<string | null> = async () => null,
+): void {
   const app = server.withTypeProvider<ZodTypeProvider>();
 
   // Locks down every /api route except the public ones above. Route-level config would be
@@ -51,7 +68,8 @@ export function registerAuthRoutes(server: FastifyInstance, auth: AuthService): 
   app.get("/api/auth/session", async (request): Promise<SessionResponse> => {
     const token = readSessionToken(request);
     const authenticated = token ? await auth.authenticate(token) : null;
-    return { needsSetup: await auth.needsSetup(), user: authenticated?.user ?? null };
+    const buttonLabel = await ssoButtonLabel();
+    return { needsSetup: await auth.needsSetup(), user: authenticated?.user ?? null, sso: buttonLabel ? { buttonLabel } : null };
   });
 
   app.post("/api/auth/setup", { schema: credentialsSchema }, async (request, reply) => {

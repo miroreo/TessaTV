@@ -26,6 +26,8 @@ export type Jsonified<T> = T extends Date
 export interface SessionResponse {
   readonly needsSetup: boolean;
   readonly user: PublicUser | null;
+  /** Set when single sign-on is configured and on: the login page shows this button. */
+  readonly sso: { readonly buttonLabel: string } | null;
 }
 
 /** `POST /api/auth/setup` and `POST /api/auth/login` */
@@ -227,4 +229,41 @@ export interface LibraryScanResult {
 export interface LibraryScanStatus {
   readonly running: boolean;
   readonly lastScan: LibraryScanResult | null;
+}
+
+/** `GET /api/settings` (admins only). Secrets are never sent back, only whether one is set. */
+export interface ServerSettingsResponse {
+  readonly maxStreamHeight: number | null;
+  readonly oidc: {
+    readonly enabled: boolean;
+    readonly publicUrl: string;
+    readonly issuerUrl: string;
+    readonly clientId: string;
+    readonly hasClientSecret: boolean;
+    readonly adminGroup: string | null;
+    readonly requiredGroup: string | null;
+    readonly buttonLabel: string;
+  } | null;
+}
+
+/** `PATCH /api/settings`'s `oidc`. Omitting `clientSecret` keeps the saved one. */
+export interface OidcSettingsInput {
+  readonly enabled: boolean;
+  readonly publicUrl: string;
+  readonly issuerUrl: string;
+  readonly clientId: string;
+  readonly clientSecret?: string;
+  readonly adminGroup: string | null;
+  readonly requiredGroup: string | null;
+  readonly buttonLabel: string;
+}
+
+/** `GET /api/users` (admins only). */
+export interface UserSummary {
+  readonly id: string;
+  readonly username: string;
+  readonly isAdmin: boolean;
+  readonly hasPassword: boolean;
+  readonly usesSso: boolean;
+  readonly createdAt: string;
 }

@@ -112,12 +112,17 @@ export const appUser = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     username: text("username").notNull(),
-    passwordHash: text("password_hash").notNull(),
+    // Null for accounts that only sign in through SSO.
+    passwordHash: text("password_hash"),
+    oidcSubject: text("oidc_subject"),
     isAdmin: boolean("is_admin").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("app_user_username_lower").on(sql`lower(${table.username})`)],
+  (table) => [
+    uniqueIndex("app_user_username_lower").on(sql`lower(${table.username})`),
+    uniqueIndex("app_user_oidc_subject").on(table.oidcSubject),
+  ],
 );
 
 /** Only the SHA-256 of each bearer token is stored; deleting a row revokes that session. */

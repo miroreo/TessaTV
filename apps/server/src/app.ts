@@ -5,6 +5,7 @@ import type {
   MediaAvailabilityRepository,
   MetadataCacheRepository,
   ServerSettingsRepository,
+  UserRepository,
   WatchProgressRepository,
 } from "@tessatv/domain";
 import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
@@ -22,7 +23,9 @@ import { registerLibraryMergeRoutes } from "./routes/library-merge.js";
 import { registerLibraryMetadataRoutes } from "./routes/library-metadata.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerPlaybackRoutes, type PlaybackDependencies } from "./routes/playback.js";
+import { registerOidcRoutes } from "./routes/oidc.js";
 import { registerServerSettingsRoutes } from "./routes/server-settings.js";
+import { oidcClientConfig, type SsoDependencies } from "./sso.js";
 import { type NodeRequestHandler, registerWebUiRoutes } from "./routes/web-ui.js";
 
 export interface AppDependencies {
@@ -49,6 +52,10 @@ export interface AppDependencies {
   };
   /** Server-wide settings (admin-only routes, mounted with `auth`); playback applies them. */
   settings?: ServerSettingsRepository;
+  /** Lists accounts on the settings page. */
+  users?: UserRepository;
+  /** Single sign-on; mounted with `auth`, configured in `settings`. */
+  sso?: SsoDependencies;
   /** Library folder settings and scanning; admin-only routes, mounted together with `auth`. */
   libraryFolders?: LibraryFolderDependencies;
   /** SvelteKit's built handler, served at the root for any path no explicit route claims. Omitted when the web app isn't built. */
@@ -73,7 +80,20 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
 
   app.get("/health", async () => ({ status: "ok" }));
 
-  if (deps.auth) registerAuthRoutes(app, deps.auth);
+  if (deps.auth) {
+    const sso = deps.sso;
+    registerAuthRoutes(
+      app,
+      deps.auth,
+      sso
+        ? async () => {
+            const { oidc } = await sso.settings.get();
+            return oidcClientConfig(oidc, sso.clientSecrets) ? oidc!.buttonLabel : null;
+          }
+        : undefined,
+    );
+    if (sso) registerOidcRoutes(app, deps.auth, sso);
+  }
   registerLibraryRoutes(app, deps.libraryRepository);
   registerLibraryImportRoutes(app, deps.libraryRepository, deps.metadataProviders);
   registerLibraryMetadataRoutes(app, deps.libraryRepository, deps.metadataProviders);
@@ -87,7 +107,13 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   }
 
   if (deps.auth && deps.libraryFolders) registerLibraryFolderRoutes(app, deps.libraryFolders);
-  if (deps.auth && deps.settings) registerServerSettingsRoutes(app, deps.settings);
+  if (deps.auth && deps.settings) {
+    registerServerSettingsRoutes(app, {
+      settings: deps.settings,
+      ...(deps.users ? { users: deps.users } : {}),
+      ...(deps.sso ? { sso: { client: deps.sso.client, clientSecrets: deps.sso.clientSecrets } } : {}),
+    });
+  }
 
   if (deps.jellyfin) registerJellyfinCompat(app, deps.jellyfin);
   if (deps.webUiHandler) registerWebUiRoutes(app, deps.webUiHandler);

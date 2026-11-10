@@ -23,6 +23,16 @@ class Users implements UserRepository {
   async countUsers() {
     return this.users.length;
   }
+  async getUserByOidcSubject(subject: string) {
+    return this.users.find((user) => user.oidcSubject === subject) ?? null;
+  }
+  async listUsers() {
+    return [...this.users];
+  }
+  async updateOidcLogin(id: string, changes: { oidcSubject: string; isAdmin: boolean; updatedAt: Date }) {
+    const index = this.users.findIndex((user) => user.id === id);
+    if (index >= 0) this.users[index] = { ...this.users[index]!, ...changes };
+  }
   async getUser(id: string) {
     return this.users.find((user) => user.id === id) ?? null;
   }

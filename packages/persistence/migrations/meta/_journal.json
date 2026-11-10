@@ -92,6 +92,13 @@
       "when": 1794344202169,
       "tag": "0012_server_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794345288061,
+      "tag": "0013_sso_accounts",
+      "breakpoints": true
     }
   ]
 }

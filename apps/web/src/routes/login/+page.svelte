@@ -1,7 +1,14 @@
 <script lang="ts">
   import { goto, invalidateAll } from "$app/navigation";
+  import { page } from "$app/state";
   import CredentialsForm from "$lib/CredentialsForm.svelte";
   import { submitCredentials } from "$lib/session.js";
+  import type { PageData } from "./$types.js";
+
+  let { data }: { data: PageData } = $props();
+
+  /** Set by the SSO callback when a sign-in didn't work out. */
+  const ssoError = $derived(page.url.searchParams.get("error"));
 
   async function login(username: string, password: string) {
     const error = await submitCredentials("/api/auth/login", username, password);
@@ -16,6 +23,18 @@
 <div class="card bg-base-200 mx-auto mt-12 max-w-sm">
   <div class="card-body items-center">
     <h1 class="card-title text-2xl">Sign in</h1>
-    <CredentialsForm submitLabel="Sign in" onsubmit={login} />
+    {#if ssoError}<div class="alert alert-error w-full text-sm">{ssoError}</div>{/if}
+    {#if data.session.sso}
+      <!-- A full page load: the server redirects to the sign-in provider. -->
+      <a class="btn btn-warning w-full" href="/api/auth/oidc/login" data-sveltekit-reload>{data.session.sso.buttonLabel}</a>
+      <details class="collapse-arrow collapse w-full">
+        <summary class="collapse-title text-sm opacity-70">Sign in with a password</summary>
+        <div class="collapse-content">
+          <CredentialsForm submitLabel="Sign in" onsubmit={login} />
+        </div>
+      </details>
+    {:else}
+      <CredentialsForm submitLabel="Sign in" onsubmit={login} />
+    {/if}
   </div>
 </div>

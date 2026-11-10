@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { MAX_STREAM_HEIGHTS, type LibraryFolderSummary, type LibraryScanStatus, type MaxStreamHeight, type ServerSettings } from "@tessatv/domain";
+  import {
+    MAX_STREAM_HEIGHTS,
+    type LibraryFolderSummary,
+    type LibraryScanStatus,
+    type MaxStreamHeight,
+    type OidcSettingsInput,
+    type ServerSettingsResponse,
+  } from "@tessatv/domain";
   import { invalidateAll } from "$app/navigation";
   import { api } from "$lib/api.js";
   import Icon from "$lib/Icon.svelte";
@@ -61,7 +68,7 @@
   let settingsSaved = $state(false);
   let settingsError = $state<string | null>(null);
   $effect.pre(() => {
-    maxStreamHeight = data.settings.maxStreamHeight;
+    maxStreamHeight = data.settings.maxStreamHeight as MaxStreamHeight | null;
   });
 
   const HEIGHT_LABEL: Record<MaxStreamHeight, string> = { 2160: "4K (2160p)", 1440: "1440p", 1080: "1080p", 720: "720p", 480: "480p" };
@@ -72,13 +79,67 @@
     settingsSaved = false;
     settingsError = null;
     try {
-      const saved = await api<ServerSettings>(fetch, "/api/settings", { method: "PATCH", body: JSON.stringify({ maxStreamHeight }) });
-      maxStreamHeight = saved.maxStreamHeight;
+      const saved = await api<ServerSettingsResponse>(fetch, "/api/settings", { method: "PATCH", body: JSON.stringify({ maxStreamHeight }) });
+      maxStreamHeight = saved.maxStreamHeight as MaxStreamHeight | null;
       settingsSaved = true;
     } catch (cause) {
       settingsError = (cause as Error).message;
     } finally {
       savingSettings = false;
+    }
+  }
+
+  /** The SSO form, starting from what's saved (the secret is never sent back, only whether one is set). */
+  const savedOidc = $derived(data.settings.oidc);
+  let sso = $state({
+    enabled: false,
+    publicUrl: "",
+    issuerUrl: "",
+    clientId: "",
+    clientSecret: "",
+    adminGroup: "",
+    requiredGroup: "",
+    buttonLabel: "Sign in with Authentik",
+  });
+  $effect.pre(() => {
+    const saved = savedOidc;
+    sso = {
+      enabled: saved?.enabled ?? false,
+      publicUrl: saved?.publicUrl ?? window.location.origin,
+      issuerUrl: saved?.issuerUrl ?? "",
+      clientId: saved?.clientId ?? "",
+      clientSecret: "",
+      adminGroup: saved?.adminGroup ?? "",
+      requiredGroup: saved?.requiredGroup ?? "",
+      buttonLabel: saved?.buttonLabel ?? "Sign in with Authentik",
+    };
+  });
+  const callbackUrl = $derived(`${sso.publicUrl.replace(/\/+$/, "") || window.location.origin}/api/auth/oidc/callback`);
+  let savingSso = $state(false);
+  let ssoMessage = $state<{ ok: boolean; text: string } | null>(null);
+
+  async function saveSso(event: SubmitEvent) {
+    event.preventDefault();
+    savingSso = true;
+    ssoMessage = null;
+    const oidc: OidcSettingsInput = {
+      enabled: sso.enabled,
+      publicUrl: sso.publicUrl,
+      issuerUrl: sso.issuerUrl,
+      clientId: sso.clientId,
+      ...(sso.clientSecret ? { clientSecret: sso.clientSecret } : {}),
+      adminGroup: sso.adminGroup || null,
+      requiredGroup: sso.requiredGroup || null,
+      buttonLabel: sso.buttonLabel,
+    };
+    try {
+      await api<ServerSettingsResponse>(fetch, "/api/settings", { method: "PATCH", body: JSON.stringify({ oidc }) });
+      await invalidateAll();
+      ssoMessage = { ok: true, text: sso.enabled ? "Saved. The login page now offers single sign-on." : "Saved (single sign-on is off)." };
+    } catch (cause) {
+      ssoMessage = { ok: false, text: (cause as Error).message };
+    } finally {
+      savingSso = false;
     }
   }
 
@@ -116,6 +177,86 @@
       starts.
     </p>
     {#if settingsError}<div class="alert alert-error">{settingsError}</div>{/if}
+  </div>
+</section>
+
+<section class="card bg-base-200 mb-6">
+  <div class="card-body">
+    <h2 class="card-title">Single sign-on</h2>
+    <p class="text-sm opacity-70">
+      Sign in through an OpenID Connect provider such as Authentik. Anyone it lets through gets an account the first time they sign
+      in; members of the admin group are admins. Your own password keeps working, so a provider problem can't lock you out.
+    </p>
+    <form class="grid gap-3 sm:grid-cols-2" onsubmit={saveSso}>
+      <label class="label col-span-full cursor-pointer justify-start gap-3">
+        <input type="checkbox" class="toggle toggle-warning" bind:checked={sso.enabled} />
+        <span class="text-base-content">Offer single sign-on on the login page</span>
+      </label>
+      <label class="floating-label col-span-full">
+        <span>TessaTV's address</span>
+        <input class="input w-full font-mono" placeholder="https://tv.example.com" bind:value={sso.publicUrl} required />
+      </label>
+      <div class="col-span-full text-sm">
+        Redirect URI to give your provider: <code class="bg-base-100 rounded px-1 break-all select-all">{callbackUrl}</code>
+      </div>
+      <label class="floating-label col-span-full">
+        <span>Issuer URL</span>
+        <input class="input w-full font-mono" placeholder="https://auth.example.com/application/o/tessatv/" bind:value={sso.issuerUrl} required />
+      </label>
+      <label class="floating-label">
+        <span>Client ID</span>
+        <input class="input w-full font-mono" bind:value={sso.clientId} required />
+      </label>
+      <label class="floating-label">
+        <span>Client secret</span>
+        <input
+          class="input w-full font-mono"
+          type="password"
+          autocomplete="off"
+          placeholder={savedOidc?.hasClientSecret ? "Saved — leave blank to keep" : ""}
+          bind:value={sso.clientSecret}
+          required={!savedOidc?.hasClientSecret}
+        />
+      </label>
+      <label class="floating-label">
+        <span>Admin group</span>
+        <input class="input w-full" placeholder="tessatv-admins" bind:value={sso.adminGroup} />
+      </label>
+      <label class="floating-label">
+        <span>Required group (optional)</span>
+        <input class="input w-full" placeholder="Anyone the provider allows" bind:value={sso.requiredGroup} />
+      </label>
+      <label class="floating-label col-span-full">
+        <span>Button text</span>
+        <input class="input w-full" bind:value={sso.buttonLabel} required maxlength="60" />
+      </label>
+      <div class="col-span-full flex flex-wrap items-center gap-3">
+        <button type="submit" class="btn btn-warning" disabled={savingSso}>
+          {#if savingSso}<span class="loading loading-spinner loading-sm"></span>{/if} Save
+        </button>
+        {#if ssoMessage}
+          <span class="text-sm" class:text-success={ssoMessage.ok} class:text-error={!ssoMessage.ok}>{ssoMessage.text}</span>
+        {/if}
+      </div>
+    </form>
+  </div>
+</section>
+
+<section class="card bg-base-200 mb-6">
+  <div class="card-body">
+    <h2 class="card-title">Users</h2>
+    <ul class="list">
+      {#each data.users as user (user.id)}
+        <li class="list-row items-center">
+          <div class="list-col-grow">{user.username}</div>
+          <div class="flex flex-wrap gap-1">
+            {#if user.isAdmin}<span class="badge badge-sm badge-warning">Admin</span>{/if}
+            {#if user.usesSso}<span class="badge badge-sm badge-ghost">SSO</span>{/if}
+            {#if user.hasPassword}<span class="badge badge-sm badge-ghost">Password</span>{/if}
+          </div>
+        </li>
+      {/each}
+    </ul>
   </div>
 </section>
 

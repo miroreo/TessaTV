@@ -17,6 +17,16 @@ class InMemoryUsers implements UserRepository {
   async countUsers() {
     return this.users.length;
   }
+  async getUserByOidcSubject(subject: string) {
+    return this.users.find((user) => user.oidcSubject === subject) ?? null;
+  }
+  async listUsers() {
+    return [...this.users];
+  }
+  async updateOidcLogin(id: string, changes: { oidcSubject: string; isAdmin: boolean; updatedAt: Date }) {
+    const index = this.users.findIndex((user) => user.id === id);
+    if (index >= 0) this.users[index] = { ...this.users[index]!, ...changes };
+  }
   async getUser(id: string) {
     return this.users.find((user) => user.id === id) ?? null;
   }
@@ -94,7 +104,7 @@ function sessionCookie(setCookie: string | string[] | number | undefined): strin
 describe("auth routes", () => {
   it("reports that setup is needed on a fresh install", async () => {
     const response = await buildTestApp().inject({ method: "GET", url: "/api/auth/session" });
-    expect(response.json()).toEqual({ needsSetup: true, user: null });
+    expect(response.json()).toEqual({ needsSetup: true, user: null, sso: null });
   });
 
   it("first-run setup creates the admin, sets an HttpOnly cookie, and can't be repeated", async () => {

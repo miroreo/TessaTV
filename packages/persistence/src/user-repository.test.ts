@@ -26,7 +26,7 @@ function fakeUser(username: string): User {
   const id = randomUUID();
   createdIds.push(id);
   const now = new Date();
-  return { id, username, passwordHash: "scrypt$test", isAdmin: false, createdAt: now, updatedAt: now };
+  return { id, username, passwordHash: "scrypt$test", oidcSubject: null, isAdmin: false, createdAt: now, updatedAt: now };
 }
 
 describe("DrizzleUserRepository", () => {

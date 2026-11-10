@@ -1,6 +1,7 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   MAX_STREAM_HEIGHTS,
+  type OidcSettings,
   type ServerSettings,
   type ServerSettingsRepository,
 } from "@tessatv/domain";
@@ -12,7 +13,27 @@ import { serverSetting } from "./schema.js";
 const PARSERS: { [K in keyof ServerSettings]: (value: unknown) => ServerSettings[K] | undefined } = {
   maxStreamHeight: (value) =>
     value === null ? null : MAX_STREAM_HEIGHTS.find((height) => height === value),
+  oidc: (value) => (value === null ? null : parseOidc(value)),
 };
+
+function parseOidc(value: unknown): OidcSettings | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const v = value as Record<string, unknown>;
+  const text = (key: string) => (typeof v[key] === "string" ? (v[key] as string) : undefined);
+  const optional = (key: string) => (v[key] === null ? null : text(key));
+  const [publicUrl, issuerUrl, clientId, clientSecretSealed, buttonLabel] = [
+    text("publicUrl"), text("issuerUrl"), text("clientId"), text("clientSecretSealed"), text("buttonLabel"),
+  ];
+  const adminGroup = optional("adminGroup");
+  const requiredGroup = optional("requiredGroup");
+  if (
+    typeof v.enabled !== "boolean" || publicUrl === undefined || issuerUrl === undefined || clientId === undefined ||
+    clientSecretSealed === undefined || buttonLabel === undefined || adminGroup === undefined || requiredGroup === undefined
+  ) {
+    return undefined;
+  }
+  return { enabled: v.enabled, publicUrl, issuerUrl, clientId, clientSecretSealed, adminGroup, requiredGroup, buttonLabel };
+}
 
 export class DrizzleServerSettingsRepository implements ServerSettingsRepository {
   constructor(private readonly db: Database) {}

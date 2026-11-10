@@ -1,5 +1,5 @@
 import type { AuthSession, AuthSessionRepository, User, UserRepository } from "@tessatv/domain";
-import { count, eq, sql } from "drizzle-orm";
+import { asc, count, eq, sql } from "drizzle-orm";
 import type { Database } from "./db.js";
 import { appUser, authSession } from "./schema.js";
 
@@ -11,6 +11,7 @@ function toUser(row: typeof appUser.$inferSelect): User {
     id: row.id,
     username: row.username,
     passwordHash: row.passwordHash,
+    oidcSubject: row.oidcSubject,
     isAdmin: row.isAdmin,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -38,6 +39,15 @@ export class DrizzleUserRepository implements UserRepository {
     return row ? toUser(row) : null;
   }
 
+  async getUserByOidcSubject(subject: string): Promise<User | null> {
+    const [row] = await this.db.select().from(appUser).where(eq(appUser.oidcSubject, subject));
+    return row ? toUser(row) : null;
+  }
+
+  async listUsers(): Promise<User[]> {
+    return (await this.db.select().from(appUser).orderBy(asc(appUser.createdAt))).map(toUser);
+  }
+
   async createFirstUser(user: User): Promise<boolean> {
     // A plain "insert where not exists" can race under READ COMMITTED — two transactions
     // both see an empty table. The transaction-scoped advisory lock serializes them.
@@ -56,6 +66,10 @@ export class DrizzleUserRepository implements UserRepository {
 
   async updatePasswordHash(id: string, passwordHash: string, updatedAt: Date): Promise<void> {
     await this.db.update(appUser).set({ passwordHash, updatedAt }).where(eq(appUser.id, id));
+  }
+
+  async updateOidcLogin(id: string, changes: { oidcSubject: string; isAdmin: boolean; updatedAt: Date }): Promise<void> {
+    await this.db.update(appUser).set(changes).where(eq(appUser.id, id));
   }
 }
 

@@ -1,4 +1,4 @@
-import { AuthService } from "@tessatv/auth";
+import { AuthService, OidcClient, SecretBox } from "@tessatv/auth";
 import { loadConfig } from "@tessatv/config";
 import { type MetadataProvidersByKind, refreshLibraryMetadata } from "@tessatv/library";
 import { deriveServerId } from "@tessatv/jellyfin-compat";
@@ -31,7 +31,9 @@ await runMigrations(db);
 const libraryRepository = new DrizzleLibraryRepository(db);
 const metadataCacheRepository = new DrizzleMetadataCacheRepository(db);
 const loudnessRepository = new DrizzleLoudnessRepository(db);
-const auth = new AuthService(new DrizzleUserRepository(db), new DrizzleAuthSessionRepository(db));
+const users = new DrizzleUserRepository(db);
+const auth = new AuthService(users, new DrizzleAuthSessionRepository(db));
+const serverSettings = new DrizzleServerSettingsRepository(db);
 
 const tmdbProvider = config.TMDB_API_KEY
   ? new CachedMetadataProvider(new TmdbMetadataProvider(new TmdbClient({ apiKey: config.TMDB_API_KEY })), metadataCacheRepository)
@@ -85,7 +87,14 @@ const app = buildApp({
     availability,
   },
   libraryFolders: { folders: libraryFolders, scanner },
-  settings: new DrizzleServerSettingsRepository(db),
+  settings: serverSettings,
+  users,
+  sso: {
+    settings: serverSettings,
+    client: new OidcClient(),
+    clientSecrets: new SecretBox(config.APP_SECRET, "oidc-client-secret"),
+    pendingSignIns: new SecretBox(config.APP_SECRET, "oidc-pending-sign-in"),
+  },
   jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },
   ...(webUiHandler ? { webUiHandler } : {}),
 });

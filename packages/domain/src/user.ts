@@ -6,8 +6,13 @@ export interface User {
   readonly id: string;
   /** Display form as entered. Uniqueness is case-insensitive. */
   readonly username: string;
-  /** Self-describing hash string produced by `packages/auth` — never a plaintext password. */
-  readonly passwordHash: string;
+  /**
+   * Self-describing hash string produced by `packages/auth` — never a plaintext password.
+   * Null for an account that only signs in through SSO.
+   */
+  readonly passwordHash: string | null;
+  /** The SSO provider's stable `sub` for this person, once they've signed in through it. */
+  readonly oidcSubject: string | null;
   readonly isAdmin: boolean;
   readonly createdAt: Date;
   readonly updatedAt: Date;
