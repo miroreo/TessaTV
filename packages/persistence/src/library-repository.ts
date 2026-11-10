@@ -1,9 +1,9 @@
 import type { LibraryNode, LibraryRepository, MediaFile, Unit } from "@tessatv/domain";
-import { eq, isNull } from "drizzle-orm";
+import { eq, isNull, sql } from "drizzle-orm";
 import type { Database } from "./db.js";
 import { loadExternalIds, replaceExternalIds } from "./external-id-store.js";
 import { toDomainLibraryNode, toDomainMediaFile, toDomainUnit } from "./mappers.js";
-import { libraryNode as libraryNodeTable, mediaFile as mediaFileTable, unit as unitTable } from "./schema.js";
+import { libraryNode as libraryNodeTable, mediaFile as mediaFileTable, unit as unitTable, watchProgress } from "./schema.js";
 
 export class DrizzleLibraryRepository implements LibraryRepository {
   constructor(private readonly db: Database) {}
@@ -104,6 +104,26 @@ export class DrizzleLibraryRepository implements LibraryRepository {
       })
       .where(eq(unitTable.id, unitValue.id));
     await replaceExternalIds(this.db, "unit", unitValue.id, unitValue.externalIds);
+  }
+
+  async moveWatchProgress(fromUnitId: string, toUnitId: string): Promise<void> {
+    if (fromUnitId === toUnitId) return;
+    // One transaction, so the history is never in neither place.
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`
+        insert into ${watchProgress} (user_id, unit_id, position_seconds, duration_seconds, completed, updated_at)
+        select user_id, ${toUnitId}, position_seconds, duration_seconds, completed, updated_at
+        from ${watchProgress} where unit_id = ${fromUnitId}
+        on conflict (user_id, unit_id) do update set
+          position_seconds = case when excluded.updated_at > ${watchProgress}.updated_at
+            then excluded.position_seconds else ${watchProgress}.position_seconds end,
+          duration_seconds = case when excluded.updated_at > ${watchProgress}.updated_at
+            then excluded.duration_seconds else ${watchProgress}.duration_seconds end,
+          completed = ${watchProgress}.completed or excluded.completed,
+          updated_at = greatest(${watchProgress}.updated_at, excluded.updated_at)
+      `);
+      await tx.delete(watchProgress).where(eq(watchProgress.unitId, fromUnitId));
+    });
   }
 
   async getMediaFile(id: string): Promise<MediaFile | null> {

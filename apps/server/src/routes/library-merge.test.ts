@@ -34,6 +34,7 @@ class InMemoryLibraryRepository implements LibraryRepository {
   async updateUnit(unit: Unit) {
     this.units.set(unit.id, unit);
   }
+  async moveWatchProgress() {}
   async getMediaFile(): Promise<MediaFile | null> {
     return null;
   }
@@ -134,5 +135,20 @@ describe("POST /api/library/merge-duplicates/confirm", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+
+  it("returns 400 and changes nothing for a series merged into itself", async () => {
+    const repo = new InMemoryLibraryRepository();
+    await repo.createNode(makeNode({ id: "series-a" }));
+    const app = buildApp({ libraryRepository: repo, metadataProviders: {} });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/library/merge-duplicates/confirm",
+      payload: { primaryNodeId: "series-a", duplicateNodeId: "series-a" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(await repo.getNode("series-a")).not.toBeNull();
   });
 });

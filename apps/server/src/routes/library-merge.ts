@@ -1,5 +1,5 @@
 import type { LibraryRepository } from "@tessatv/domain";
-import { confirmSeriesMerge, mergeDuplicateSeries, type MetadataProvidersByKind } from "@tessatv/library";
+import { confirmSeriesMerge, InvalidSeriesMergeError, mergeDuplicateSeries, type MetadataProvidersByKind } from "@tessatv/library";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -30,7 +30,13 @@ export function registerLibraryMergeRoutes(
         return { error: "not_found" };
       }
 
-      await confirmSeriesMerge(libraryRepository, primaryNodeId, duplicateNodeId);
+      try {
+        await confirmSeriesMerge(libraryRepository, primaryNodeId, duplicateNodeId);
+      } catch (error) {
+        if (!(error instanceof InvalidSeriesMergeError)) throw error;
+        reply.code(400);
+        return { error: "invalid_merge", message: error.message };
+      }
       return { merged: { primaryNodeId, duplicateNodeId } };
     },
   );

@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDatabase, type Database } from "./db.js";
 import { DrizzleLibraryRepository } from "./library-repository.js";
-import { appUser, libraryNode } from "./schema.js";
+import { appUser, libraryNode, unit, watchProgress } from "./schema.js";
 import { DrizzleWatchProgressRepository } from "./watch-progress-repository.js";
 
 // Requires a running Postgres, like the other repository tests: the upsert and the
@@ -15,6 +15,8 @@ const library = new DrizzleLibraryRepository(db);
 const userIds: string[] = [];
 const nodeIds: string[] = [];
 afterAll(async () => {
+  // Watch history blocks deleting its user or unit, so it has to go first.
+  if (userIds.length) await db.delete(watchProgress).where(inArray(watchProgress.userId, userIds));
   if (nodeIds.length) await db.delete(libraryNode).where(inArray(libraryNode.id, nodeIds));
   if (userIds.length) await db.delete(appUser).where(inArray(appUser.id, userIds));
 });
@@ -57,5 +59,33 @@ describe("DrizzleWatchProgressRepository", () => {
     expect(await progress.listRecent(userId, 1)).toHaveLength(1);
     expect((await progress.listForUnits(userId, [unitIds[0]])).map((row) => row.positionSeconds)).toEqual([1]);
     expect(await progress.listForUnits(userId, [])).toEqual([]);
+  });
+
+  it("refuses to delete a unit, its node or its user while watch history exists", async () => {
+    const { userId, unitIds } = await fixture();
+    await progress.save({ userId, unitId: unitIds[0], positionSeconds: 5, durationSeconds: null, completed: false, updatedAt: new Date() });
+    await expect(db.delete(unit).where(eq(unit.id, unitIds[0]))).rejects.toThrow();
+    await expect(library.deleteNode(nodeIds.at(-1)!)).rejects.toThrow();
+    await expect(db.delete(appUser).where(eq(appUser.id, userId))).rejects.toThrow();
+    expect(await progress.get(userId, unitIds[0])).not.toBeNull();
+  });
+
+  it("moves history between units, merging where a user has both", async () => {
+    const { userId, unitIds } = await fixture();
+    const other = (await fixture()).userId;
+    const row = (unitId: string, positionSeconds: number, completed: boolean, at: number, user = userId) =>
+      progress.save({ userId: user, unitId, positionSeconds, durationSeconds: 100, completed, updatedAt: new Date(at) });
+    await row(unitIds[0], 40, false, 2_000); // newer position, not watched
+    await row(unitIds[1], 95, true, 1_000); // older, but watched
+    await row(unitIds[0], 10, false, 3_000, other); // only on the source
+
+    await library.moveWatchProgress(unitIds[0], unitIds[1]);
+
+    expect(await progress.get(userId, unitIds[1])).toEqual({
+      userId, unitId: unitIds[1], positionSeconds: 40, durationSeconds: 100, completed: true, updatedAt: new Date(2_000),
+    });
+    expect((await progress.get(other, unitIds[1]))?.positionSeconds).toBe(10);
+    expect(await progress.get(userId, unitIds[0])).toBeNull();
+    expect(await progress.get(other, unitIds[0])).toBeNull();
   });
 });

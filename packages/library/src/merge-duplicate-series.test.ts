@@ -2,7 +2,7 @@ import type { LibraryNode, LibraryRepository, MediaFile, Unit } from "@tessatv/d
 import type { MetadataProvider, MetadataSearchCandidate } from "@tessatv/metadata";
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { confirmSeriesMerge, mergeDuplicateSeries } from "./merge-duplicate-series.js";
+import { confirmSeriesMerge, InvalidSeriesMergeError, mergeDuplicateSeries } from "./merge-duplicate-series.js";
 
 class InMemoryLibraryRepository implements LibraryRepository {
   nodes = new Map<string, LibraryNode>();
@@ -20,8 +20,16 @@ class InMemoryLibraryRepository implements LibraryRepository {
   async updateNode(node: LibraryNode) {
     this.nodes.set(node.id, node);
   }
+  /** Unit ids with watch history. Like the real database, deleting one's node is refused. */
+  watched = new Set<string>();
   async deleteNode(id: string) {
+    if ((await this.listUnits(id)).some((unit) => this.watched.has(unit.id))) {
+      throw new Error(`node ${id} still has watch history`);
+    }
     this.nodes.delete(id);
+  }
+  async moveWatchProgress(fromUnitId: string, toUnitId: string) {
+    if (this.watched.delete(fromUnitId)) this.watched.add(toUnitId);
   }
   async getUnit(id: string) {
     return this.units.get(id) ?? null;
@@ -229,6 +237,45 @@ describe("confirmSeriesMerge", () => {
     expect(await repo.getNode("series-b")).toBeNull();
     const primarySeasons = await repo.listChildren("series-a");
     expect(primarySeasons.map((s) => s.id)).toEqual(["season-b1"]);
+  });
+
+  it("carries watch history from a duplicate episode over to the one it keeps", async () => {
+    const repo = new InMemoryLibraryRepository();
+    await repo.createNode(makeNode({ id: "series-a", sourceKey: "Common Name" }));
+    await repo.createNode(makeNode({ id: "season-a1", parentId: "series-a", sourceKey: "season:1" }));
+    await repo.createNode(makeNode({ id: "series-b", sourceKey: "Common Name" }));
+    await repo.createNode(makeNode({ id: "season-b1", parentId: "series-b", sourceKey: "season:1" }));
+    await addEpisode(repo, "season-a1", 1, 1);
+    await addEpisode(repo, "season-b1", 1, 1);
+    const unitIn = async (seasonId: string) => (await repo.listUnits((await repo.listChildren(seasonId))[0]!.id))[0]!;
+    const [kept, duplicate] = [await unitIn("season-a1"), await unitIn("season-b1")];
+    repo.watched.add(duplicate.id);
+
+    await confirmSeriesMerge(repo, "series-a", "series-b");
+
+    expect(await repo.getNode("series-b")).toBeNull();
+    expect([...repo.watched]).toEqual([kept.id]);
+  });
+
+  it("refuses to merge a series into itself, which would delete every episode", async () => {
+    const repo = new InMemoryLibraryRepository();
+    await repo.createNode(makeNode({ id: "series-a", sourceKey: "Show" }));
+    await repo.createNode(makeNode({ id: "season-a1", parentId: "series-a", sourceKey: "season:1" }));
+    await addEpisode(repo, "season-a1", 1, 1);
+
+    await expect(confirmSeriesMerge(repo, "series-a", "series-a")).rejects.toBeInstanceOf(InvalidSeriesMergeError);
+    expect(repo.nodes.size).toBe(3);
+  });
+
+  it("refuses anything but two top-level series", async () => {
+    const repo = new InMemoryLibraryRepository();
+    await repo.createNode(makeNode({ id: "series-a", sourceKey: "Show" }));
+    await repo.createNode(makeNode({ id: "season-a1", parentId: "series-a", sourceKey: "season:1" }));
+    await repo.createNode(makeNode({ id: "movie", mediaType: "movie", kind: "leaf", sourceKey: "Movie" }));
+
+    await expect(confirmSeriesMerge(repo, "series-a", "season-a1")).rejects.toBeInstanceOf(InvalidSeriesMergeError);
+    await expect(confirmSeriesMerge(repo, "movie", "series-a")).rejects.toBeInstanceOf(InvalidSeriesMergeError);
+    expect(repo.nodes.size).toBe(3);
   });
 });
 

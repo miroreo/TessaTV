@@ -487,6 +487,12 @@ isn't on `PATH`, so run tests inside `nix develop`.
 - `POST /api/progress/:unitId {positionSeconds, durationSeconds, ended}` — one
   `watch_progress` row per (user, unit) (migration 0006); ≥90% counts as watched, <30s isn't resumable.
   `continueWatching`/`nextUp`/`pickNextUnit` live in `packages/library`.
+- **Watch history is never deleted as a side effect.** Both `watch_progress` foreign keys
+  are `ON DELETE RESTRICT` (migration 0010), so Postgres refuses to delete a unit, its
+  node or a user that still has history. Code that removes a unit must first move its
+  history with `LibraryRepository.moveWatchProgress` (the series merge does this for a
+  duplicate episode: the newer position wins, watched if either was). Deleting history on
+  purpose would need its own explicit, user-requested feature — none exists today.
 
 The UI (`/`, `/title/[id]`, `/watch/[unitId]` — names chosen not to collide with Jellyfin
 routes) asks the *browser* what it can decode (`detectCapabilities`: `canPlayType` for
@@ -536,7 +542,9 @@ the real library: 271 relinked, 1,454 of 1,470 files playable (the rest are unpa
 names like `S01X01` webisodes, or duplicate copies). (2) Merging series deleted the
 duplicate node, so the next scan of its folder recreated it — the survivor now keeps the
 duplicate's folder name in `library_node.source_aliases` (migration 0009), which import
-lookups match on.
+lookups match on. (3) `confirmSeriesMerge` with the same id on both sides matched every
+episode against itself and deleted the whole series, cascading its watch history; it now
+rejects anything but two different top-level series (400 from the route).
 
 Migrations now run at startup (`runMigrations`), so deploying a new version needs no
 manual step; it shares `drizzle-kit migrate`'s bookkeeping table.

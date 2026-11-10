@@ -32,6 +32,7 @@ class InMemoryLibraryRepository implements LibraryRepository {
   async updateUnit(unit: Unit) {
     this.units.set(unit.id, unit);
   }
+  async moveWatchProgress() {}
   async getMediaFile(): Promise<MediaFile | null> {
     return null;
   }

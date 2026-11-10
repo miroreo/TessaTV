@@ -70,6 +70,11 @@ async function mergeSeasonsInto(
         : null;
 
       if (alreadyOnPrimary) {
+        // Same episode twice: keep the primary's, carrying over whatever was watched on this one.
+        const [primaryUnit] = await repository.listUnits(alreadyOnPrimary.id);
+        for (const duplicateUnit of await repository.listUnits(episode.id)) {
+          await repository.moveWatchProgress(duplicateUnit.id, primaryUnit!.id);
+        }
         await repository.deleteNode(episode.id);
       } else {
         await repository.updateNode({ ...episode, parentId: matchingPrimarySeason.id });
@@ -152,5 +157,19 @@ export async function confirmSeriesMerge(
   primaryNodeId: string,
   duplicateNodeId: string,
 ): Promise<void> {
+  // Merging a series into itself would match every episode against itself and delete it.
+  if (primaryNodeId === duplicateNodeId) throw new InvalidSeriesMergeError("Can't merge a series into itself");
+  const nodes = await Promise.all([repository.getNode(primaryNodeId), repository.getNode(duplicateNodeId)]);
+  if (!nodes.every((node) => node?.mediaType === "series" && node.parentId === null)) {
+    throw new InvalidSeriesMergeError("Both ids must be top-level series");
+  }
   await mergeSeasonsInto(repository, primaryNodeId, duplicateNodeId);
+}
+
+/** A merge request that doesn't name two different top-level series; maps to a 400. */
+export class InvalidSeriesMergeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidSeriesMergeError";
+  }
 }

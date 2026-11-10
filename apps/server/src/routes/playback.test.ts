@@ -100,6 +100,7 @@ class Library implements LibraryRepository {
   }
   async createUnit() {}
   async updateUnit() {}
+  async moveWatchProgress() {}
   async getMediaFile(id: string) {
     return this.files.find((entry) => entry.id === id) ?? null;
   }

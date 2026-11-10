@@ -136,16 +136,21 @@ export const authSession = pgTable(
   (table) => [uniqueIndex("auth_session_token_hash").on(table.tokenHash)],
 );
 
-/** One row per (user, unit), overwritten as playback progresses — see `WatchProgress`. */
+/**
+ * One row per (user, unit), overwritten as playback progresses — see `WatchProgress`.
+ * Both references are `restrict`, so the database refuses to delete a user or unit that
+ * still has watch history: code that removes one must move its history first
+ * (`LibraryRepository.moveWatchProgress`), and nothing can lose it by cascade.
+ */
 export const watchProgress = pgTable(
   "watch_progress",
   {
     userId: uuid("user_id")
       .notNull()
-      .references(() => appUser.id, { onDelete: "cascade" }),
+      .references(() => appUser.id, { onDelete: "restrict" }),
     unitId: uuid("unit_id")
       .notNull()
-      .references(() => unit.id, { onDelete: "cascade" }),
+      .references(() => unit.id, { onDelete: "restrict" }),
     positionSeconds: doublePrecision("position_seconds").notNull(),
     durationSeconds: doublePrecision("duration_seconds"),
     completed: boolean("completed").notNull().default(false),

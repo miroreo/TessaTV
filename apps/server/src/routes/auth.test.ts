@@ -69,6 +69,7 @@ class EmptyLibrary implements LibraryRepository {
   }
   async createUnit() {}
   async updateUnit() {}
+  async moveWatchProgress() {}
   async getMediaFile(): Promise<MediaFile | null> {
     return null;
   }

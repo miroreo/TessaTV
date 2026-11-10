@@ -13,13 +13,20 @@ export interface LibraryRepository {
   updateNode(node: LibraryNode): Promise<void>;
   /** Deletes exactly this node (and its external ids) — callers must reparent or delete
    * any children first; there is no cascading delete across the unconstrained parentId
-   * self-reference. */
+   * self-reference. Fails if one of its units still has watch history: move that first
+   * with `moveWatchProgress`. */
   deleteNode(id: string): Promise<void>;
 
   getUnit(id: string): Promise<Unit | null>;
   listUnits(libraryNodeId: string): Promise<Unit[]>;
   createUnit(unit: Unit): Promise<void>;
   updateUnit(unit: Unit): Promise<void>;
+  /**
+   * Moves every user's watch history from one unit to another, for when two units turn out
+   * to be the same thing (an episode imported twice). Where a user has history on both, the
+   * more recently updated position wins and the unit stays watched if either was.
+   */
+  moveWatchProgress(fromUnitId: string, toUnitId: string): Promise<void>;
 
   getMediaFile(id: string): Promise<MediaFile | null>;
   createMediaFile(file: MediaFile): Promise<void>;
