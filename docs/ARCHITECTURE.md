@@ -496,8 +496,12 @@ isn't on `PATH`, so run tests inside `nix develop`.
   are `ON DELETE RESTRICT` (migration 0010), so Postgres refuses to delete a unit, its
   node or a user that still has history. Code that removes a unit must first move its
   history with `LibraryRepository.moveWatchProgress` (the series merge does this for a
-  duplicate episode: the newer position wins, watched if either was). Deleting history on
-  purpose would need its own explicit, user-requested feature — none exists today.
+  duplicate episode: the newer position wins, watched if either was). The only deliberate
+  changes are the user's own: `POST /api/progress/watched {unitIds, watched}` marks
+  episodes, seasons or a movie watched (position set to the end, `watched_at` kept at
+  `greatest`) or unwatched (`watched_at` cleared, position kept), and `DELETE
+  /api/progress/:unitId/position` forgets a saved position (the × on Continue watching).
+  The title page's ⋯ menus call these; `WatchedMenu.svelte` + `lib/watched.ts`.
 
 The UI (`/`, `/title/[id]`, `/watch/[unitId]` — names chosen not to collide with Jellyfin
 routes) asks the *browser* what it can decode (`detectCapabilities`: `canPlayType` for
@@ -649,7 +653,61 @@ clients send `Authorization: Bearer <token>` (the login/setup responses also ret
 Non-`/api` routes (`/health`, Jellyfin discovery, the UI itself) stay public. The UI's
 root layout load sends people to `/setup`, `/login`, or the app based on
 `/api/auth/session`. Not yet: roles beyond the single admin flag (every user can do
-everything), user management UI, login rate limiting.
+everything), editing or removing users, login rate limiting.
+
+### Single sign-on (built)
+
+OpenID Connect through `openid-client` (authorization code + PKCE + state + nonce), built
+for Authentik but provider-agnostic. Everything is configured on the Settings page and
+stored in `server_setting` (key `oidc`, migration 0012; `ServerSettings.oidc`), so no
+restart or env var is involved:
+- **Accounts come from the provider.** Anyone it lets through gets a TessaTV account on
+  their first sign-in, named after `preferred_username` (fallback: `email`, then `sub`),
+  linked by the provider's `sub` (`app_user.oidc_subject`, migration 0013, which also
+  makes `password_hash` nullable — SSO accounts have no password and `POST
+  /api/auth/login` refuses them). An existing account with the same username (the local
+  admin) is linked on first SSO login, so Tessa keeps one account either way. Members of
+  the configured **admin group** (from the `groups` claim) are admins, re-evaluated on every
+  sign-in (an account that also has a password can be promoted this way but never
+  demoted, so a provider mistake can't lock the local admin out); an optional **required group** turns everyone else away with a reason on the
+  login page. Usernames the provider hands out that already belong to someone else linked
+  to a *different* subject fail with `username_taken`.
+- **Password login stays** for accounts that have one, folded under the SSO button on the
+  login page, so a provider outage can't lock the admin out.
+- **Secrets**: the client secret is sealed with `SecretBox` (AES-256-GCM, key derived from
+  `APP_SECRET` with HKDF per purpose) before it's stored, and the API never returns it
+  (`hasClientSecret` only; saving without a secret keeps the saved one). The sign-in's
+  state/nonce/PKCE verifier travel in a sealed, 10-minute `tessatv_oidc` cookie scoped to
+  `/api/auth/oidc`, so there's no server-side pending-login table and a callback from
+  another browser (or forged) is rejected.
+- **Addresses**: the public URL the admin enters is what the callback is rebuilt on, since
+  behind a reverse proxy Fastify sees the proxy's address. Saving with SSO enabled runs
+  discovery first and refuses an issuer that doesn't answer (422 `issuer_unreachable`);
+  the issuer is stored exactly as the provider states it, and a trailing slash typed
+  wrong is retried the other way (Authentik's issuers end in one; `OidcClient.check`).
+  Plain-HTTP issuers are allowed (LAN/Tailscale homelabs).
+- Routes: `GET /api/auth/oidc/login` (redirects to the provider) and
+  `GET /api/auth/oidc/callback` (back to `/`, or `/login?error=…`), both public;
+  `GET/PATCH /api/settings` and `GET /api/users` are admin-only. `SsoDependencies.
+  onAccountCreated` fires once per new account (the hook the Jellyfin history import
+  uses). Tests: `apps/server/src/routes/oidc.test.ts` runs full sign-ins against
+  `oauth2-mock-server`; `packages/auth/src/oidc.test.ts` covers discovery.
+
+**Authentik setup** (what the Settings card expects):
+1. Authentik → *Applications → Providers → Create → OAuth2/OpenID Provider*. Client type
+   *Confidential*; redirect URI = the one the Settings card shows
+   (`<TessaTV's address>/api/auth/oidc/callback`); signing key: any. Copy the client ID
+   and client secret.
+2. Create an *Application* bound to that provider (slug e.g. `tessatv`). On the provider's
+   overview, copy the *OpenID Configuration Issuer* — it looks like
+   `https://auth.example.com/application/o/tessatv/`.
+3. Scopes: the provider's default `openid`, `email`, `profile` are enough; the `groups`
+   claim comes from Authentik's default *profile* scope mapping. If groups are missing,
+   add the built-in `authentik default OAuth Mapping: OpenID 'profile'` scope mapping.
+4. In TessaTV's Settings → Single sign-on: TessaTV's address (as users reach it), the
+   issuer, client ID + secret, the Authentik group whose members should be admins, and
+   optionally a group that's required to sign in at all. Save; the login page now shows
+   the button.
 
 ### Jobs (done — metadata refresh; more job types come with acquisition)
 
