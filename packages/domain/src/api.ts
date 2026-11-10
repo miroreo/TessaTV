@@ -134,3 +134,31 @@ export interface PlaybackSessionResponse {
   readonly subtitleUrl: string | null;
   readonly reasons: readonly string[];
 }
+
+/** `GET /api/library/folders` */
+export interface LibraryFolderSummary {
+  readonly id: string;
+  readonly mediaType: "movie" | "series";
+  readonly path: string;
+  /** Whether the server can currently list it — false for an unmounted drive, a typo, etc. */
+  readonly reachable: boolean;
+}
+
+export interface LibraryScanResult {
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly moviesAdded: number;
+  readonly episodesAdded: number;
+  readonly identified: number;
+  readonly markedMissing: number;
+  readonly restored: number;
+  /** Folders skipped this run, and why (e.g. unreachable — never treated as "everything's gone"). */
+  readonly skippedFolders: readonly { readonly path: string; readonly reason: string }[];
+  readonly error: string | null;
+}
+
+/** `GET /api/library/scan` and `POST /api/library/scan` */
+export interface LibraryScanStatus {
+  readonly running: boolean;
+  readonly lastScan: LibraryScanResult | null;
+}

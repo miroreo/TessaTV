@@ -57,6 +57,13 @@
       "when": 1794288174694,
       "tag": "0007_perfect_magma",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794290769474,
+      "tag": "0008_public_machine_man",
+      "breakpoints": true
     }
   ]
 }

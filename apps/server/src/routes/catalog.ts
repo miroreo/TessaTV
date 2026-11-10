@@ -1,11 +1,12 @@
-import type {
-  LibraryNode,
+import {
+  isPlayable,
+  type LibraryNode,
   MetadataCacheRepository,
-  TitleSummary,
-  Unit,
-  UnitSummary,
-  WatchEntrySummary,
-  WatchProgress,
+  type TitleSummary,
+  type Unit,
+  type UnitSummary,
+  type WatchEntrySummary,
+  type WatchProgress,
 } from "@tessatv/domain";
 import type { WatchEntry } from "@tessatv/library";
 import { toMetadataMediaKind, type MetadataDetails } from "@tessatv/metadata";
@@ -59,7 +60,7 @@ export function unitSummary(unit: Unit, progress: WatchProgress | null): UnitSum
     title: unit.title,
     season: season ?? null,
     episode: episode ?? null,
-    playable: unit.mediaFileId !== null,
+    playable: isPlayable(unit),
     progress: progress
       ? { positionSeconds: progress.positionSeconds, durationSeconds: progress.durationSeconds, completed: progress.completed }
       : null,

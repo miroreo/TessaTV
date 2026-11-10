@@ -10,12 +10,15 @@ import {
   DrizzleLibraryRepository,
   DrizzleMetadataCacheRepository,
   DrizzleUserRepository,
+  DrizzleLibraryFolderRepository,
   DrizzleLoudnessRepository,
+  DrizzleMediaAvailabilityRepository,
   DrizzleWatchProgressRepository,
   runMigrations,
 } from "@tessatv/persistence";
 import { measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
+import { LibraryScanner } from "./library-scanner.js";
 import { loadWebUiHandler } from "./routes/web-ui.js";
 
 // Daily, matching CachedMetadataProvider's default TTL.
@@ -57,6 +60,16 @@ const transcodes = new TranscodeManager({
     app.log.warn({ error: error.message, path: plan.path }, `${hardwareAccel.kind} transcode failed; retrying on the CPU`),
 });
 
+const availability = new DrizzleMediaAvailabilityRepository(db);
+const libraryFolders = new DrizzleLibraryFolderRepository(db);
+const scanner = new LibraryScanner({
+  folders: libraryFolders,
+  repository: libraryRepository,
+  availability,
+  providers: metadataProviders,
+  onError: (error) => app.log.error(error, "library scan failed"),
+});
+
 const webUiHandler = await loadWebUiHandler();
 
 const app = buildApp({
@@ -68,7 +81,9 @@ const app = buildApp({
     metadataCache: metadataCacheRepository,
     transcodes,
     loudnessRepository,
+    availability,
   },
+  libraryFolders: { folders: libraryFolders, scanner },
   jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },
   ...(webUiHandler ? { webUiHandler } : {}),
 });
@@ -76,6 +91,20 @@ const app = buildApp({
 const jobs = new JobScheduler(config.DATABASE_URL, {
   onError: (error) => app.log.error(error, "job scheduler error"),
 });
+// Every 15 minutes: import new files from the library folders (Settings page) and hide or
+// restore titles whose files went missing or came back. Re-scans are cheap — known files are
+// skipped — and the "Scan now" button shares the same scanner, so the two never overlap.
+jobs.register({
+  name: "library-scan",
+  cron: "*/15 * * * *",
+  handler: async () => {
+    const result = await scanner.scan();
+    if (result.moviesAdded || result.episodesAdded || result.markedMissing || result.restored || result.skippedFolders.length) {
+      app.log.info(result, "library-scan finished");
+    }
+  },
+});
+
 // Every 15 minutes, measure loudness for files that haven't been yet (newest first), for
 // playback's volume normalization. Each run stops starting new files after 10 minutes so it
 // finishes inside pg-boss's default 15-minute job expiry; a full library catches up over

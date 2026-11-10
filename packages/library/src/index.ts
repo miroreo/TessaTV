@@ -9,3 +9,4 @@ export * from "./auto-identify.js";
 export * from "./refresh-metadata.js";
 export * from "./merge-duplicate-series.js";
 export * from "./watch-history.js";
+export * from "./library-scan.js";

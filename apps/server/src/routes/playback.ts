@@ -2,6 +2,7 @@ import { basename, dirname } from "node:path";
 import send from "@fastify/send";
 import {
   isCompletedPosition,
+  isPlayable,
   type LibraryRepository,
   type LoudnessRepository,
   normalizationGainDb,
@@ -139,7 +140,7 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
     const root = await findRoot(libraryRepository, playable.unit.libraryNodeId);
     const siblings = root ? await listUnitsUnder(libraryRepository, root.id) : [];
     const position = siblings.findIndex((unit) => unit.id === playable.unit.id);
-    const next = siblings.slice(position + 1).find((unit) => unit.mediaFileId !== null) ?? null;
+    const next = siblings.slice(position + 1).find(isPlayable) ?? null;
     const progress = await progressRepository.get(request.user!.id, playable.unit.id);
     const loudness = await deps.loudnessRepository?.get(playable.file.id);
 

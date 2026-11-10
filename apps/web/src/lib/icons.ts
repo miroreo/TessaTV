@@ -1,6 +1,12 @@
 // Heroicons (24px solid), straight from the official `heroicons` package's SVG files —
 // there's no official Svelte build, and its raw SVGs need no wrapper library.
 import adjustments from "heroicons/24/solid/adjustments-horizontal.svg?raw";
+import rescan from "heroicons/24/solid/arrow-path.svg?raw";
+import settings from "heroicons/24/solid/cog-6-tooth.svg?raw";
+import warning from "heroicons/24/solid/exclamation-triangle.svg?raw";
+import folder from "heroicons/24/solid/folder.svg?raw";
+import add from "heroicons/24/solid/plus.svg?raw";
+import remove from "heroicons/24/solid/trash.svg?raw";
 import arrowLeft from "heroicons/24/solid/arrow-left.svg?raw";
 import back from "heroicons/24/solid/arrow-uturn-left.svg?raw";
 import ahead from "heroicons/24/solid/arrow-uturn-right.svg?raw";
@@ -17,6 +23,12 @@ import muted from "heroicons/24/solid/speaker-x-mark.svg?raw";
 
 export const icons = {
   adjustments,
+  rescan,
+  settings,
+  warning,
+  folder,
+  add,
+  remove,
   arrowLeft,
   back,
   ahead,

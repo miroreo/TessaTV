@@ -20,3 +20,8 @@ export interface Unit {
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
+
+/** Has a file, and the last library scan found it on disk. */
+export function isPlayable(unit: Pick<Unit, "mediaFileId" | "availability">): boolean {
+  return unit.mediaFileId !== null && unit.availability === "available";
+}

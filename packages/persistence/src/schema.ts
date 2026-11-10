@@ -167,3 +167,15 @@ export const audioLoudness = pgTable("audio_loudness", {
   measuredAt: timestamp("measured_at", { withTimezone: true }).notNull().defaultNow(),
   error: text("error"),
 });
+
+/** Folders the scheduled library scan imports from — see `LibraryFolder`. */
+export const libraryFolder = pgTable(
+  "library_folder",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    mediaType: text("media_type").notNull(),
+    path: text("path").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("library_folder_path").on(table.path)],
+);

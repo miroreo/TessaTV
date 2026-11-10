@@ -1,4 +1,10 @@
-import type { HomeResponse, LibraryRepository, TitleResponse, WatchProgressRepository } from "@tessatv/domain";
+import type {
+  HomeResponse,
+  LibraryRepository,
+  MediaAvailabilityRepository,
+  TitleResponse,
+  WatchProgressRepository,
+} from "@tessatv/domain";
 import { continueWatching, listUnitsUnder, nextUp, pickNextUnit } from "@tessatv/library";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -9,6 +15,7 @@ export interface BrowseDependencies {
   readonly libraryRepository: LibraryRepository;
   readonly progressRepository: WatchProgressRepository;
   readonly catalog: Catalog;
+  readonly availability?: MediaAvailabilityRepository;
 }
 
 /** Read-only views shaped for the UI's pages, so a page is one request rather than dozens. */
@@ -18,11 +25,15 @@ export function registerBrowseRoutes(server: FastifyInstance, deps: BrowseDepend
 
   app.get("/api/browse/home", async (request): Promise<HomeResponse> => {
     const userId = request.user!.id;
-    const [roots, resume, upNext] = await Promise.all([
+    const [allRoots, playableRoots, resume, upNext] = await Promise.all([
       libraryRepository.listChildren(null),
+      deps.availability?.listRootsWithPlayableUnits(),
       continueWatching(libraryRepository, progressRepository, userId),
       nextUp(libraryRepository, progressRepository, userId),
     ]);
+    // Titles whose files have all gone missing stay in the database (with their watch
+    // history) but drop out of the library until a scan finds them again.
+    const roots = playableRoots ? allRoots.filter((root) => playableRoots.has(root.id)) : allRoots;
     const sorted = [...roots].sort((a, b) => a.sortTitle.localeCompare(b.sortTitle));
     const titles = await catalog.titles(sorted);
     return {

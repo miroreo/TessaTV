@@ -1,5 +1,6 @@
 import {
   compareUnitSequence,
+  isPlayable,
   isResumable,
   type LibraryNode,
   type LibraryRepository,
@@ -42,7 +43,7 @@ export async function listUnitsUnder(repository: LibraryRepository, nodeId: stri
  * finished final episode yields null — there's nothing next.
  */
 export function pickNextUnit(units: readonly Unit[], progress: readonly WatchProgress[]): Unit | null {
-  const playable = units.filter((unit) => unit.mediaFileId !== null);
+  const playable = units.filter(isPlayable);
   const byUnit = new Map(progress.map((entry) => [entry.unitId, entry]));
   const latest = playable
     .map((unit) => byUnit.get(unit.id))
@@ -62,7 +63,8 @@ async function resolveEntries(
     progress.map(async (entry) => {
       const unit = await repository.getUnit(entry.unitId);
       const root = unit ? await findRoot(repository, unit.libraryNodeId) : null;
-      return unit && root ? ({ unit, root, progress: entry } satisfies WatchEntry) : null;
+      // A file that's gone missing drops out of "continue watching" until it's back.
+      return unit && root && isPlayable(unit) ? ({ unit, root, progress: entry } satisfies WatchEntry) : null;
     }),
   );
   return entries.filter((entry) => entry !== null);

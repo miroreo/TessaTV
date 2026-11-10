@@ -51,8 +51,7 @@ Repo: https://github.com/miroreo/TessaTV (private).
   at the root — see the Jellyfin Mobile decision below for why. **Auth is built** (see
   "Auth" below): first-run setup page, login/logout, and every `/api` route locked behind
   a session — verified end-to-end in headless Chromium against a throwaway database.
-  **Next:** deploy to the real server; then a scheduled library scan (imports are still a
-  manual `POST /api/library/import`), and Jellyfin Mobile's native player via
+  **Next:** deploy to the real server; then Jellyfin Mobile's native player via
   `window.NativeShell` (the web player is used inside its web view for now). Live client testing is the plan
   for the compat phase: the dev server's `PORT` was moved to **8080** (still binds
   `0.0.0.0`) specifically so the official Jellyfin iOS app can connect to this machine
@@ -515,6 +514,18 @@ disagree on whether the element's own volume applies to a Web Audio source. The 
 only built after a user interaction (a suspended AudioContext would silence the video) and
 never for Safari's native HLS (its media-element source outputs silence), so normalization
 is unavailable for HLS on iOS/Safari.
+
+**Library scan** (admin Settings page at `/settings`): library folders live in
+`library_folder` (migration 0008), each tagged movies or shows. The `library-scan` job runs
+every 15 minutes, and "Scan now" / adding a folder share the same `LibraryScanner`, so scans
+never overlap. A scan runs the same `importFolders` pipeline as `POST /api/library/import`
+(scan, create, auto-identify, merge duplicate series), then reconciles: every known file
+under a reachable folder is checked on disk, and its unit is marked `missing` or `available`
+again — nothing is deleted, so watch history survives. A folder that can't be read, **or is
+empty**, is skipped for that run (an unmounted drive's mount point is usually empty), never
+read as "everything was deleted". One `isPlayable(unit)` rule (has a file and is
+`available`) drives the library, next up, continue watching and autoplay; titles with no
+playable units drop off the home page (`listRootsWithPlayableUnits`, a recursive CTE).
 
 Migrations now run at startup (`runMigrations`), so deploying a new version needs no
 manual step; it shares `drizzle-kit migrate`'s bookkeeping table.

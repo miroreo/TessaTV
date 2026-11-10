@@ -2,6 +2,7 @@
   import "../app.css";
   import { goto, invalidateAll } from "$app/navigation";
   import { page } from "$app/state";
+  import Icon from "$lib/Icon.svelte";
   import type { Snippet } from "svelte";
   import type { LayoutData } from "./$types.js";
 
@@ -24,6 +25,9 @@
   <header class="navbar bg-base-200 px-4">
     <a href="/" class="flex-1 text-xl font-bold">TessaTV</a>
     <div class="flex items-center gap-2">
+      {#if data.session.user.isAdmin}
+        <a href="/settings" class="btn btn-ghost btn-sm" aria-label="Settings" title="Settings"><Icon name="settings" /></a>
+      {/if}
       <span class="text-sm opacity-70">{data.session.user.username}</span>
       <button type="button" class="btn btn-ghost btn-sm" onclick={logout}>Log out</button>
     </div>

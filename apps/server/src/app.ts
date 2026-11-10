@@ -1,5 +1,11 @@
 import type { AuthService } from "@tessatv/auth";
-import type { LibraryRepository, LoudnessRepository, MetadataCacheRepository, WatchProgressRepository } from "@tessatv/domain";
+import type {
+  LibraryRepository,
+  LoudnessRepository,
+  MediaAvailabilityRepository,
+  MetadataCacheRepository,
+  WatchProgressRepository,
+} from "@tessatv/domain";
 import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
 import type { MetadataProvidersByKind } from "@tessatv/library";
 import fastifyCookie from "@fastify/cookie";
@@ -9,6 +15,7 @@ import { hasZodFastifySchemaValidationErrors, validatorCompiler } from "fastify-
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerBrowseRoutes } from "./routes/browse.js";
 import { Catalog } from "./routes/catalog.js";
+import { type LibraryFolderDependencies, registerLibraryFolderRoutes } from "./routes/library-folders.js";
 import { registerLibraryImportRoutes } from "./routes/library-import.js";
 import { registerLibraryMergeRoutes } from "./routes/library-merge.js";
 import { registerLibraryMetadataRoutes } from "./routes/library-metadata.js";
@@ -33,9 +40,13 @@ export interface AppDependencies {
     metadataCache: MetadataCacheRepository | null;
     transcodes: TranscodeManager;
     loudnessRepository?: LoudnessRepository;
+    /** Hides titles whose files have all gone missing. Without it, every title shows. */
+    availability?: MediaAvailabilityRepository;
     probe?: PlaybackDependencies["probe"];
     extractSubtitles?: PlaybackDependencies["extractSubtitles"];
   };
+  /** Library folder settings and scanning; admin-only routes, mounted together with `auth`. */
+  libraryFolders?: LibraryFolderDependencies;
   /** SvelteKit's built handler, served at the root for any path no explicit route claims. Omitted when the web app isn't built. */
   webUiHandler?: NodeRequestHandler;
 }
@@ -67,9 +78,11 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   if (deps.auth && deps.playback) {
     const catalog = new Catalog(deps.playback.metadataCache);
     const shared = { libraryRepository: deps.libraryRepository, progressRepository: deps.playback.progressRepository, catalog };
-    registerBrowseRoutes(app, shared);
+    registerBrowseRoutes(app, { ...shared, ...(deps.playback.availability ? { availability: deps.playback.availability } : {}) });
     registerPlaybackRoutes(app, { ...shared, ...deps.playback });
   }
+
+  if (deps.auth && deps.libraryFolders) registerLibraryFolderRoutes(app, deps.libraryFolders);
 
   if (deps.jellyfin) registerJellyfinCompat(app, deps.jellyfin);
   if (deps.webUiHandler) registerWebUiRoutes(app, deps.webUiHandler);
