@@ -119,6 +119,8 @@ export interface PlaybackInfoResponse {
   readonly audioStreams: readonly StreamOption[];
   readonly subtitleStreams: readonly StreamOption[];
   readonly next: UnitSummary | null;
+  /** Gain that levels the measured audio stream to the broadcast target; null until measured. */
+  readonly normalization: { readonly audioStreamIndex: number; readonly gainDb: number } | null;
 }
 
 /** `POST /api/playback/:unitId/start` and `.../seek` */

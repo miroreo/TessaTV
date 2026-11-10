@@ -501,6 +501,21 @@ every 10s, on pause and on unload, but never before the current stream has actua
 played — otherwise a failed start reports position 0 and wipes the saved resume point.
 At the end of an episode a 10s countdown auto-plays the next one.
 
+**Volume normalization** (on by default, toggle in the player, remembered per browser):
+the `loudness-scan` job (pg-boss, every 15 min, ≤10 min per run so it fits pg-boss's job
+expiry) measures each file's default audio stream with ffmpeg's `ebur128` filter (EBU R128 /
+ITU-R BS.1770 integrated loudness), newest imports first, at `nice -n 19`, and stores it in
+`audio_loudness` (migration 0007; a failure is stored with its error, not retried). The
+player levels to **−23 LUFS** (broadcast standard; ±12 dB cap, silence left alone —
+`normalizationGainDb`) through the same Web Audio gain node + limiter as the 200% boost, so
+direct play, remux and transcode all get it without re-encoding. Measured here: ~5s per TV
+episode, ~140s for a lossless DTS-HD film track; one real episode measured −32.6 LUFS
+(+9.6 dB). Once the gain node exists it carries volume and mute too, because browsers
+disagree on whether the element's own volume applies to a Web Audio source. The graph is
+only built after a user interaction (a suspended AudioContext would silence the video) and
+never for Safari's native HLS (its media-element source outputs silence), so normalization
+is unavailable for HLS on iOS/Safari.
+
 Migrations now run at startup (`runMigrations`), so deploying a new version needs no
 manual step; it shares `drizzle-kit migrate`'s bookkeeping table.
 

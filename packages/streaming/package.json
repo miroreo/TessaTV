@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@tessatv/domain": "workspace:*",
     "execa": "^10.2.1"
   }
 }

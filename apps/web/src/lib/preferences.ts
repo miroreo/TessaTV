@@ -10,6 +10,7 @@ const KEYS = {
   audioLanguage: "tessatv.audioLanguage",
   subtitleLanguage: "tessatv.subtitleLanguage",
   volume: "tessatv.volume",
+  normalize: "tessatv.normalize",
 } as const;
 
 function read(key: string): string | null {
@@ -48,6 +49,15 @@ export function getVolume(): { volume: number; muted: boolean } {
 
 export function setVolume(volume: number, muted: boolean): void {
   write(KEYS.volume, String(muted ? -Math.max(volume, 0.01) : volume));
+}
+
+/** Volume normalization is on unless turned off. */
+export function getNormalize(): boolean {
+  return read(KEYS.normalize) !== "off";
+}
+
+export function setNormalize(on: boolean): void {
+  write(KEYS.normalize, on ? null : "off");
 }
 
 /** Tracks without a language tag are remembered as "und", ISO 639's "undetermined". */

@@ -3,6 +3,8 @@ import send from "@fastify/send";
 import {
   isCompletedPosition,
   type LibraryRepository,
+  type LoudnessRepository,
+  normalizationGainDb,
   type MediaFile,
   type PlaybackInfoResponse,
   type PlaybackSessionResponse,
@@ -32,6 +34,8 @@ export interface PlaybackDependencies {
   readonly progressRepository: WatchProgressRepository;
   readonly catalog: Catalog;
   readonly transcodes: TranscodeManager;
+  /** Optional so a deployment without the scan job simply plays unlevelled audio. */
+  readonly loudnessRepository?: LoudnessRepository;
   /** Test seams. */
   readonly probe?: (path: string) => Promise<MediaProbe>;
   readonly extractSubtitles?: (path: string, streamIndex: number) => Promise<string>;
@@ -137,6 +141,7 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
     const position = siblings.findIndex((unit) => unit.id === playable.unit.id);
     const next = siblings.slice(position + 1).find((unit) => unit.mediaFileId !== null) ?? null;
     const progress = await progressRepository.get(request.user!.id, playable.unit.id);
+    const loudness = await deps.loudnessRepository?.get(playable.file.id);
 
     const response: PlaybackInfoResponse = {
       unit: unitSummary(playable.unit, progress),
@@ -157,6 +162,10 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
         isTextBased: stream.isTextBased,
       })),
       next: next ? unitSummary(next, null) : null,
+      normalization:
+        loudness?.integratedLufs != null
+          ? { audioStreamIndex: loudness.streamIndex, gainDb: normalizationGainDb(loudness.integratedLufs) }
+          : null,
     };
     return response;
   });

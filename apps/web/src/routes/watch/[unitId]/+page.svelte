@@ -6,12 +6,14 @@
   import Icon from "$lib/Icon.svelte";
   import {
     getMaxBitrate,
+    getNormalize,
     getVolume,
     pickAudio,
     pickSubtitles,
     rememberAudio,
     rememberSubtitles,
     setMaxBitrate,
+    setNormalize,
     setVolume,
   } from "$lib/preferences.js";
   import Hls from "hls.js";
@@ -60,6 +62,15 @@
   /** 0–MAX_VOLUME. Above 1, the extra is applied as gain through Web Audio. */
   let volume = $state(1);
   let audioGraph: { context: AudioContext; gain: GainNode } | null = null;
+  let normalize = $state(true);
+  /** The browser's audio engine stays suspended until the page has seen a click or key. */
+  let userActivated = $state(false);
+  /** Gain from the measured loudness, for the stream it was measured on, while normalization is on. */
+  const normalizationGain = $derived(
+    normalize && info.normalization && info.normalization.audioStreamIndex === audioIndex
+      ? 10 ** (info.normalization.gainDb / 20)
+      : 1,
+  );
   let muted = $state(false);
   let rate = $state(1);
   let fullscreen = $state(false);
@@ -79,6 +90,11 @@
     subtitleIndex = pickSubtitles(info.subtitleStreams)?.index ?? null;
     maxBitrate = getMaxBitrate();
     ({ volume, muted } = getVolume());
+    normalize = getNormalize();
+    userActivated = navigator.userActivation?.hasBeenActive ?? false;
+    const activate = () => (userActivated = true);
+    window.addEventListener("pointerdown", activate, { once: true });
+    window.addEventListener("keydown", activate, { once: true });
     const progress = info.unit.progress;
     const resumeAt = progress && !progress.completed ? progress.positionSeconds : 0;
     void start(resumeAt);
@@ -298,21 +314,34 @@
 
   $effect(() => {
     if (!video) return;
-    video.volume = Math.min(volume, 1);
-    video.muted = muted;
-    applyBoost(Math.max(volume, 1));
+    applyGain(Math.max(volume, 1) * normalizationGain);
+    if (audioGraph) {
+      // Browsers disagree on whether the element's own volume still applies once it feeds
+      // Web Audio, so the gain node does all of it: volume, boost, normalization and mute.
+      video.volume = 1;
+      video.muted = false;
+      audioGraph.gain.gain.value = muted ? 0 : volume * normalizationGain;
+    } else {
+      video.volume = Math.min(volume, 1);
+      video.muted = muted;
+    }
     // Boost is for one unusually quiet file, so only the ordinary level is remembered.
     setVolume(Math.min(volume, 1), muted);
   });
 
   /**
-   * Amplifies past 100% by routing the element through a gain node, with a limiter after
-   * it so loud peaks don't clip. Built on first use only: once an element is routed through
-   * Web Audio it stays that way, so files nobody boosts keep the browser's direct path.
+   * Applies boost and normalization by routing the element through a gain node, with a
+   * limiter after it so raised peaks don't clip. Built on first use only: once an element
+   * is routed through Web Audio it stays that way, so a file that needs no gain keeps the
+   * browser's direct path. Two cases where Web Audio would silence playback are left alone:
+   * before any user interaction (the audio engine starts suspended), and Safari's native
+   * HLS, whose media-element source outputs nothing.
    */
-  function applyBoost(gain: number) {
-    if (gain <= 1 && !audioGraph) return;
+  function applyGain(gain: number) {
+    if (Math.abs(gain - 1) < 0.01 && !audioGraph) return;
     if (!audioGraph) {
+      const nativeHls = session?.mode !== "direct-play" && detectCapabilities(Hls.isSupported()).engine === "native";
+      if (!userActivated || !session || nativeHls) return;
       const context = new AudioContext();
       const amplifier = context.createGain();
       const limiter = context.createDynamicsCompressor();
@@ -325,7 +354,19 @@
       audioGraph = { context, gain: amplifier };
     }
     void audioGraph.context.resume();
-    audioGraph.gain.gain.value = gain;
+  }
+
+  function toggleNormalize() {
+    normalize = !normalize;
+    setNormalize(normalize);
+    const gainDb = info.normalization?.gainDb;
+    showFlash(
+      !normalize
+        ? "Normalization off"
+        : gainDb === undefined
+          ? "Normalization on (not measured yet)"
+          : `Normalization on (${gainDb > 0 ? "+" : ""}${gainDb} dB)`,
+    );
   }
 
   const volumeLabel = () => `Volume ${Math.round(volume * 100)}%${volume > 1 ? " (boosted)" : ""}`;
@@ -563,6 +604,20 @@
           <span class="badge badge-warning badge-sm" title="Boosted for this episode">{Math.round(volume * 100)}%</span>
         {/if}
       </div>
+      <button
+        type="button"
+        class="btn btn-ghost btn-circle btn-sm"
+        class:text-warning={normalize}
+        class:opacity-50={!normalize}
+        onclick={toggleNormalize}
+        aria-pressed={normalize}
+        aria-label="Volume normalization"
+        title={normalize
+          ? `Volume normalization on${info.normalization ? ` (${info.normalization.gainDb > 0 ? "+" : ""}${info.normalization.gainDb} dB)` : " — not measured yet"}`
+          : "Volume normalization off"}
+      >
+        <Icon name="normalize" />
+      </button>
       <span class="time ml-1 text-sm tabular-nums">{formatTime(position)} / {formatTime(duration)}</span>
       <span class="flex-1"></span>
       {#if info.audioStreams.length > 1}

@@ -11,6 +11,7 @@ import check from "heroicons/24/solid/check-circle.svg?raw";
 import next from "heroicons/24/solid/forward.svg?raw";
 import pause from "heroicons/24/solid/pause.svg?raw";
 import play from "heroicons/24/solid/play.svg?raw";
+import normalize from "heroicons/24/solid/scale.svg?raw";
 import volume from "heroicons/24/solid/speaker-wave.svg?raw";
 import muted from "heroicons/24/solid/speaker-x-mark.svg?raw";
 
@@ -24,6 +25,7 @@ export const icons = {
   subtitles,
   check,
   next,
+  normalize,
   pause,
   play,
   volume,

@@ -10,10 +10,11 @@ import {
   DrizzleLibraryRepository,
   DrizzleMetadataCacheRepository,
   DrizzleUserRepository,
+  DrizzleLoudnessRepository,
   DrizzleWatchProgressRepository,
   runMigrations,
 } from "@tessatv/persistence";
-import { selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
+import { measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
 import { loadWebUiHandler } from "./routes/web-ui.js";
 
@@ -25,6 +26,7 @@ const db = createDatabase(config.DATABASE_URL);
 await runMigrations(db);
 const libraryRepository = new DrizzleLibraryRepository(db);
 const metadataCacheRepository = new DrizzleMetadataCacheRepository(db);
+const loudnessRepository = new DrizzleLoudnessRepository(db);
 const auth = new AuthService(new DrizzleUserRepository(db), new DrizzleAuthSessionRepository(db));
 
 const tmdbProvider = config.TMDB_API_KEY
@@ -65,6 +67,7 @@ const app = buildApp({
     progressRepository: new DrizzleWatchProgressRepository(db),
     metadataCache: metadataCacheRepository,
     transcodes,
+    loudnessRepository,
   },
   jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },
   ...(webUiHandler ? { webUiHandler } : {}),
@@ -73,6 +76,19 @@ const app = buildApp({
 const jobs = new JobScheduler(config.DATABASE_URL, {
   onError: (error) => app.log.error(error, "job scheduler error"),
 });
+// Every 15 minutes, measure loudness for files that haven't been yet (newest first), for
+// playback's volume normalization. Each run stops starting new files after 10 minutes so it
+// finishes inside pg-boss's default 15-minute job expiry; a full library catches up over
+// several runs, then only new imports need measuring.
+jobs.register({
+  name: "loudness-scan",
+  cron: "*/15 * * * *",
+  handler: async () => {
+    const summary = await measureMissingLoudness({ repository: loudnessRepository, budgetMs: 10 * 60 * 1000 });
+    if (summary.measured || summary.failed) app.log.info(summary, "loudness-scan measured files");
+  },
+});
+
 jobs.register({
   name: "metadata-refresh",
   cron: METADATA_REFRESH_CRON,

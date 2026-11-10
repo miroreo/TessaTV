@@ -50,6 +50,13 @@
       "when": 1794284841532,
       "tag": "0006_long_annihilus",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794288174694,
+      "tag": "0007_perfect_magma",
+      "breakpoints": true
     }
   ]
 }

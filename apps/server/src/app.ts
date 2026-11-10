@@ -1,5 +1,5 @@
 import type { AuthService } from "@tessatv/auth";
-import type { LibraryRepository, MetadataCacheRepository, WatchProgressRepository } from "@tessatv/domain";
+import type { LibraryRepository, LoudnessRepository, MetadataCacheRepository, WatchProgressRepository } from "@tessatv/domain";
 import { type JellyfinCompatOptions, registerJellyfinCompat } from "@tessatv/jellyfin-compat";
 import type { MetadataProvidersByKind } from "@tessatv/library";
 import fastifyCookie from "@fastify/cookie";
@@ -32,6 +32,7 @@ export interface AppDependencies {
     progressRepository: WatchProgressRepository;
     metadataCache: MetadataCacheRepository | null;
     transcodes: TranscodeManager;
+    loudnessRepository?: LoudnessRepository;
     probe?: PlaybackDependencies["probe"];
     extractSubtitles?: PlaybackDependencies["extractSubtitles"];
   };

@@ -372,6 +372,9 @@ importers:
 
   packages/streaming:
     dependencies:
+      '@tessatv/domain':
+        specifier: workspace:*
+        version: link:../domain
       execa:
         specifier: ^10.2.1
         version: 10.2.1

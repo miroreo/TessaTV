@@ -155,3 +155,15 @@ export const watchProgress = pgTable(
     index("watch_progress_user_recent").on(table.userId, table.updatedAt),
   ],
 );
+
+/** One loudness measurement per media file — see `LoudnessMeasurement`. */
+export const audioLoudness = pgTable("audio_loudness", {
+  mediaFileId: uuid("media_file_id")
+    .primaryKey()
+    .references(() => mediaFile.id, { onDelete: "cascade" }),
+  streamIndex: integer("stream_index").notNull(),
+  integratedLufs: doublePrecision("integrated_lufs"),
+  truePeakDbtp: doublePrecision("true_peak_dbtp"),
+  measuredAt: timestamp("measured_at", { withTimezone: true }).notNull().defaultNow(),
+  error: text("error"),
+});
