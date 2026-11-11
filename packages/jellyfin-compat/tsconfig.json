@@ -2,8 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    // The Jellyfin SDK's type declarations omit file extensions, which NodeNext can't resolve
+    // (same workaround as packages/jellyfin-import). Emitted code keeps explicit extensions.
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../domain" }, { "path": "../streaming" }]
+  "references": [{ "path": "../domain" }, { "path": "../streaming" }, { "path": "../auth" }]
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AuthSession, AuthSessionRepository, LoginResponse, PublicUser, User, UserRepository } from "@tessatv/domain";
 import { hashPassword, needsRehash, verifyPassword } from "./password.js";
+import { type QuickConnectClient, type QuickConnectRequest, QuickConnectRequests } from "./quick-connect.js";
 import { generateToken, hashToken } from "./token.js";
 
 export const MIN_PASSWORD_LENGTH = 8;
@@ -14,7 +15,8 @@ export type AuthErrorCode =
   | "weak_password"
   | "invalid_credentials"
   | "not_in_required_group"
-  | "username_taken";
+  | "username_taken"
+  | "unknown_quick_connect_code";
 
 export class AuthError extends Error {
   constructor(readonly code: AuthErrorCode, message: string) {
@@ -66,6 +68,7 @@ export class AuthService {
   private readonly now: () => Date;
   /** Verified against for unknown usernames so response time doesn't reveal which exist. */
   private readonly dummyHash: Promise<string>;
+  private readonly quickConnect: QuickConnectRequests;
 
   constructor(
     private readonly users: UserRepository,
@@ -74,6 +77,7 @@ export class AuthService {
   ) {
     this.now = options.now ?? (() => new Date());
     this.dummyHash = hashPassword(generateToken());
+    this.quickConnect = new QuickConnectRequests(this.now);
   }
 
   async needsSetup(): Promise<boolean> {
@@ -160,6 +164,36 @@ export class AuthService {
       await this.sessions.touchSession(session.id, now);
     }
     return { user: toPublicUser(user), session };
+  }
+
+  /**
+   * Sign-in with a code (Jellyfin's Quick Connect): a device that can't easily type a
+   * password, or whose account only has SSO, shows `code` and polls with `secret`.
+   */
+  initiateQuickConnect(client: QuickConnectClient): QuickConnectRequest {
+    return this.quickConnect.create(client);
+  }
+
+  /** The device's poll. Null once the request has expired or been redeemed. */
+  quickConnectStatus(secret: string): QuickConnectRequest | null {
+    return this.quickConnect.get(secret);
+  }
+
+  /** Someone already signed in approves the code their TV shows, for their own account. */
+  authorizeQuickConnect(code: string, userId: string): QuickConnectRequest {
+    const authorized = this.quickConnect.authorize(code, userId);
+    if (!authorized) {
+      throw new AuthError("unknown_quick_connect_code", "That code doesn't match a device waiting to sign in. Check it, or get a new one on the device.");
+    }
+    return authorized;
+  }
+
+  /** The device trades its approved secret for a session, once. */
+  async redeemQuickConnect(secret: string, clientName: string | null = null): Promise<LoginResponse> {
+    const request = this.quickConnect.take(secret);
+    const user = request?.authorizedUserId ? await this.users.getUser(request.authorizedUserId) : null;
+    if (!user) throw new AuthError("invalid_credentials", "This sign-in code hasn't been approved");
+    return this.startSession(user, clientName);
   }
 
   async logout(token: string): Promise<void> {

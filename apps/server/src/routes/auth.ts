@@ -29,6 +29,7 @@ const ERROR_STATUS: Record<AuthErrorCode, number> = {
   invalid_credentials: 401,
   not_in_required_group: 403,
   username_taken: 409,
+  unknown_quick_connect_code: 404,
 };
 
 const credentialsSchema = { body: z.object({ username: z.string(), password: z.string() }) };
@@ -89,6 +90,16 @@ export function registerAuthRoutes(
       const result = await auth.login(username, password, clientName(request));
       setSessionCookie(request, reply, result.token);
       return { user: result.user, token: result.token } satisfies LoginResponse;
+    } catch (error) {
+      return sendAuthError(reply, error);
+    }
+  });
+
+  /** Approves the code a TV (or any Jellyfin client) is showing, as the signed-in user. */
+  app.post("/api/auth/quick-connect/authorize", { schema: { body: z.object({ code: z.string() }) } }, async (request, reply) => {
+    try {
+      auth.authorizeQuickConnect(request.body.code, request.user!.id);
+      return reply.code(204).send();
     } catch (error) {
       return sendAuthError(reply, error);
     }

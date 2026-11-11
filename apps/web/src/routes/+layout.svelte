@@ -25,6 +25,7 @@
   <header class="navbar bg-base-200 px-4">
     <a href="/" class="flex-1 text-xl font-bold">TessaTV</a>
     <div class="flex items-center gap-2">
+      <a href="/link" class="btn btn-ghost btn-sm">Sign in a TV</a>
       {#if data.session.user.isAdmin}
         <a href="/settings" class="btn btn-ghost btn-sm" aria-label="Settings" title="Settings"><Icon name="settings" /></a>
       {/if}

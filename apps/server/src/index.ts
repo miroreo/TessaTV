@@ -129,7 +129,7 @@ const app = buildApp({
     apiKeys: new SecretBox(config.APP_SECRET, "jellyfin-api-key"),
     sourceFor: (url, apiKey) => new JellyfinSdkSource(url, apiKey),
   },
-  jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV" },
+  jellyfin: { serverId: deriveServerId(config.APP_SECRET), serverName: "TessaTV", auth },
   ...(webUiHandler ? { webUiHandler } : {}),
 });
 
