@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { page } from "$app/state";
   import { ApiError, api } from "$lib/api.js";
 
-  let code = $state("");
+  // A TV's prompt can link here with the code filled in.
+  let code = $state(page.url.searchParams.get("code")?.replace(/\D/g, "").slice(0, 6) ?? "");
   let busy = $state(false);
   let message = $state<{ kind: "success" | "error"; text: string } | null>(null);
 
