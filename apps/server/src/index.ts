@@ -22,7 +22,7 @@ import {
 } from "@tessatv/persistence";
 import { FileHealthMonitor, measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
-import { createSubtitleSweep } from "./subtitle-job.js";
+import { createSubtitleDiscovery, createSubtitleSweep } from "./subtitle-job.js";
 import { MemoryDiagnostics } from "./diagnostics.js";
 import { LibraryScanner } from "./library-scanner.js";
 import { loadWebUiHandler } from "./routes/web-ui.js";
@@ -36,6 +36,7 @@ await runMigrations(db);
 const libraryRepository = new DrizzleLibraryRepository(db);
 const metadataCacheRepository = new DrizzleMetadataCacheRepository(db);
 const loudnessRepository = new DrizzleLoudnessRepository(db);
+const subtitleRepository = new DrizzleSubtitleRepository(db);
 const fileHealthRepository = new DrizzleFileHealthRepository(db);
 const users = new DrizzleUserRepository(db);
 const auth = new AuthService(users, new DrizzleAuthSessionRepository(db));
@@ -104,6 +105,7 @@ const app = buildApp({
     metadataCache: metadataCacheRepository,
     transcodes,
     loudnessRepository,
+    subtitleRepository,
     fileHealthRepository,
     availability,
   },
@@ -165,12 +167,24 @@ jobs.register({
   },
 });
 
+// Every 15 minutes, record subtitle files that appeared beside videos (put there by hand or by
+// another tool) and forget ones that were deleted. Works with or without a provider configured.
+const subtitleDiscovery = createSubtitleDiscovery({ subtitles: subtitleRepository, warn: (details, message) => app.log.warn(details, message) });
+jobs.register({
+  name: "subtitle-discovery",
+  cron: "*/15 * * * *",
+  handler: async () => {
+    const summary = await subtitleDiscovery();
+    if (summary.added || summary.removed) app.log.info(summary, "subtitle-discovery finished");
+  },
+});
+
 // Every 30 minutes, fill in missing subtitles (newest imports first; a miss is retried after 1, 3
 // and 7 days, then monthly). Off unless OpenSubtitles credentials are configured.
 const subtitleSweep = createSubtitleSweep({
   config,
   library: libraryRepository,
-  subtitles: new DrizzleSubtitleRepository(db),
+  subtitles: subtitleRepository,
   warn: (details, message) => app.log.warn(details, message),
 });
 if (subtitleSweep) {

@@ -10,3 +10,4 @@ export * from "./subtitle-service.js";
 export * from "./acquire.js";
 export * from "./sweep.js";
 export * from "./preferences.js";
+export * from "./discover.js";

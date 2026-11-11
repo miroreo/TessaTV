@@ -121,6 +121,12 @@ export interface TitleResponse {
   readonly next: UnitSummary | null;
 }
 
+/**
+ * Subtitle files beside the video are listed among its subtitle streams with an index from here
+ * up (the first is this, the next one more), so the player picks them like embedded tracks.
+ */
+export const EXTERNAL_SUBTITLE_INDEX_BASE = 10_000;
+
 export interface StreamOption {
   readonly index: number;
   readonly label: string;
@@ -128,6 +134,8 @@ export interface StreamOption {
   readonly language: string | null;
   readonly isDefault: boolean;
   readonly isForced?: boolean;
+  /** Subtitles only: a file beside the video rather than a track inside it. */
+  readonly isExternal?: boolean;
   /** Subtitles only: false means picking it forces a burn-in transcode. */
   readonly isTextBased?: boolean;
 }

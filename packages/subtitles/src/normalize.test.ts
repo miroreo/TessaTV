@@ -1,7 +1,7 @@
 import { strToU8, zipSync } from "fflate";
 import iconv from "iconv-lite";
 import { describe, expect, it } from "vitest";
-import { normalizeSubtitle } from "./normalize.js";
+import { detectEncoding, normalizeSubtitle } from "./normalize.js";
 
 const SRT = "1\n00:00:01,000 --> 00:00:02,000\nCafé crème\n";
 
@@ -30,5 +30,11 @@ describe("normalizeSubtitle", () => {
     expect(() => normalizeSubtitle({ bytes: zipSync({ "a.txt": strToU8("x") }), fileName: "s.zip" })).toThrow(/no text subtitle/);
     expect(() => normalizeSubtitle({ bytes: strToU8("  \n"), fileName: "a.srt" })).toThrow(/empty/);
     expect(() => normalizeSubtitle({ bytes: strToU8("x"), fileName: "a.idx" })).toThrow(/Unsupported/);
+  });
+
+  it("names the encoding for ffmpeg", () => {
+    expect(detectEncoding(strToU8(SRT))).toBe("utf-8");
+    expect(detectEncoding(new Uint8Array([0xff, 0xfe, 0x41, 0]))).toBe("utf-16le");
+    expect(detectEncoding(new Uint8Array(iconv.encode(SRT.repeat(5), "windows-1252")))).toMatch(/1252|8859-1|ISO-8859/i);
   });
 });

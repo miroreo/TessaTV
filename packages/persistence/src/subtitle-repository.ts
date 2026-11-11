@@ -11,6 +11,19 @@ function toFile(row: typeof subtitleFile.$inferSelect): SubtitleFile {
 export class DrizzleSubtitleRepository implements SubtitleRepository {
   constructor(private readonly db: Database) {}
 
+  async listAll(): Promise<SubtitleFile[]> {
+    return (await this.db.select().from(subtitleFile)).map(toFile);
+  }
+
+  async listPlayableFiles(): Promise<WantedSubtitle[]> {
+    const result = await this.db.execute<{ unit_id: string; media_file_id: string; path: string }>(sql`
+      select u.id as unit_id, mf.id as media_file_id, mf.path as path
+      from unit u join media_file mf on mf.id = u.media_file_id
+      where u.availability = 'available'
+    `);
+    return result.rows.map((row) => ({ unitId: row.unit_id, mediaFileId: row.media_file_id, videoPath: row.path }));
+  }
+
   async listForUnit(unitId: string): Promise<SubtitleFile[]> {
     const rows = await this.db.select().from(subtitleFile).where(eq(subtitleFile.unitId, unitId));
     return rows.map(toFile);

@@ -33,20 +33,26 @@ function unpack(download: SubtitleDownload): { bytes: Uint8Array; fileName: stri
   return { fileName: best[0], bytes: best[1] };
 }
 
-/** Subtitles in the wild are UTF-8, UTF-16, cp1252, cp1250, GBK ...; ffmpeg assumes UTF-8 and mangles the rest. */
-function decode(bytes: Uint8Array): string {
-  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return Buffer.from(bytes.subarray(3)).toString("utf8");
-  if (bytes[0] === 0xff && bytes[1] === 0xfe) return iconv.decode(Buffer.from(bytes), "utf-16le").replace(/^\uFEFF/, "");
-  if (bytes[0] === 0xfe && bytes[1] === 0xff) return iconv.decode(Buffer.from(bytes), "utf-16be").replace(/^\uFEFF/, "");
-
-  const strict = new TextDecoder("utf-8", { fatal: true });
+/**
+ * The encoding a subtitle file is in, as a name both iconv and ffmpeg's `-sub_charenc` accept.
+ * Subtitles in the wild are UTF-8, UTF-16, cp1252, cp1250, GBK ...; ffmpeg assumes UTF-8 and
+ * mangles the rest, so it has to be told.
+ */
+export function detectEncoding(bytes: Uint8Array): string {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return "utf-8";
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return "utf-16le";
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return "utf-16be";
   try {
-    return strict.decode(bytes);
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return "utf-8";
   } catch {
     // Not valid UTF-8: ask the detector, and fall back to Western European, the most common case.
-    const detected = chardet.analyse(bytes).find((match) => iconv.encodingExists(match.name))?.name;
-    return iconv.decode(Buffer.from(bytes), detected ?? "windows-1252");
+    return chardet.analyse(bytes).find((match) => iconv.encodingExists(match.name))?.name ?? "windows-1252";
   }
+}
+
+function decode(bytes: Uint8Array): string {
+  return iconv.decode(Buffer.from(bytes), detectEncoding(bytes), { stripBOM: true });
 }
 
 /** Turns what a provider handed over (maybe zipped, in any charset) into UTF-8 subtitle text. */

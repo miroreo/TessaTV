@@ -1,6 +1,10 @@
 import type { SubtitleFile, SubtitleSearchRecord, SubtitleSlot, WantedSubtitle } from "../subtitle.js";
 
 export interface SubtitleRepository {
+  /** Every subtitle file recorded, for checking them against what is on disk. */
+  listAll(): Promise<SubtitleFile[]>;
+  /** Every unit with a playable file, for finding subtitle files beside them. */
+  listPlayableFiles(): Promise<WantedSubtitle[]>;
   listForUnit(unitId: string): Promise<SubtitleFile[]>;
   get(id: string): Promise<SubtitleFile | null>;
   /** Also clears the slot's search record, since it is filled now. */

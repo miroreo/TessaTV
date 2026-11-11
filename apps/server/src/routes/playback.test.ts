@@ -12,6 +12,8 @@ import type {
   MediaFile,
   ServerSettings,
   ServerSettingsRepository,
+  SubtitleFile,
+  SubtitleRepository,
   Unit,
   User,
   UserRepository,
@@ -148,6 +150,18 @@ class FakeFileHealth implements FileHealthRepository {
 }
 
 const NOW = new Date(0);
+
+/** Only what playback reads: the files recorded for a unit. */
+class FakeSubtitles {
+  constructor(private readonly files: SubtitleFile[]) {}
+  async listForUnit(unitId: string) {
+    return this.files.filter((file) => file.unitId === unitId);
+  }
+  async get(id: string) {
+    return this.files.find((file) => file.id === id) ?? null;
+  }
+}
+
 const node = (id: string, kind: LibraryNode["kind"], parentId: string | null, mediaType: string): LibraryNode => ({
   id, kind, parentId, mediaType, title: id, sortTitle: id, sourceKey: id, externalIds: [],
   monitored: true, qualityProfileId: null, createdAt: NOW, updatedAt: NOW,
@@ -208,6 +222,7 @@ describe("browse, playback and progress routes", () => {
   let root: string;
   let app: ReturnType<typeof buildApp>;
   let headers: { authorization: string };
+  const extractCalls: { index: number; charset: string | undefined }[] = [];
   const progress = new InMemoryProgress();
   const settings = new InMemorySettings();
   const fileHealth = new FakeFileHealth();
@@ -221,6 +236,12 @@ describe("browse, playback and progress routes", () => {
       resolutionHeight: 720, sizeBytes: 26, checksum: null, importedAt: NOW,
     }));
     for (const file of files) await writeFile(file.path, "abcdefghijklmnopqrstuvwxyz");
+    await writeFile(join(root, "film.en.srt"), "1\n00:00:01,000 --> 00:00:02,000\nHello\n");
+    await writeFile(join(root, "film.fr.srt"), Buffer.from([0x43, 0x61, 0x66, 0xe9, 0x20, 0x63, 0x72, 0xe8, 0x6d, 0x65, 0x20, 0x61, 0x75, 0x20, 0x6c, 0x61, 0x69, 0x74, 0x20, 0x65, 0x74, 0x20, 0x6a, 0x27, 0x61, 0x69, 0x6d, 0x65, 0x20, 0x6c, 0xe0, 0x20, 0xe9, 0xe8, 0xea]));
+    const subtitleFile = (id: string, unitId: string, language: string, path: string, forced = false): SubtitleFile => ({
+      id, unitId, mediaFileId: `file-${unitId}`, language, forced, hearingImpaired: false, source: "downloaded", provider: null,
+      providerId: null, score: null, path, format: "srt", createdAt: NOW,
+    });
     const library = new Library(
       [node("show", "collection", null, "series"), node("s1", "collection", "show", "series"), node("l1", "leaf", "s1", "series"), node("l2", "leaf", "s1", "series"), node("movie", "leaf", null, "movie")],
       [unit("e2", "l2", [1, 2]), unit("e1", "l1", [1, 1]), { ...unit("film", "movie", []), mediaType: "movie" }],
@@ -260,7 +281,15 @@ describe("browse, playback and progress routes", () => {
         transcodes,
         fileHealthRepository: fileHealth,
         probe: async (path) => probeOf(path, path.endsWith(".mp4") ? "mp4" : "mkv"),
-        extractSubtitles: async () => "WEBVTT\n\n00:01:40.000 --> 00:01:45.000\nHi\n",
+        subtitleRepository: new FakeSubtitles([
+          subtitleFile("sub-fr", "film", "fr", join(root, "film.fr.srt")),
+          subtitleFile("sub-en", "film", "en", join(root, "film.en.srt")),
+          subtitleFile("sub-gone", "e1", "en", join(root, "missing.en.srt")),
+        ]) as unknown as SubtitleRepository,
+        extractSubtitles: async (_path, index, charset) => {
+          extractCalls.push({ index, charset });
+          return "WEBVTT\n\n00:01:40.000 --> 00:01:45.000\nHi\n";
+        },
       },
     });
   });
@@ -285,6 +314,48 @@ describe("browse, playback and progress routes", () => {
     expect(ranged.body).toBe("cde");
     const beyond = await app.inject({ method: "GET", url: "/api/playback/film/file", headers: { ...headers, range: "bytes=99-" } });
     expect(beyond.statusCode).toBe(416);
+  });
+
+  it("lists subtitle files beside the video after the embedded tracks, in a stable order", async () => {
+    const info = (await app.inject({ method: "GET", url: "/api/playback/film", headers })).json();
+    expect(info.subtitleStreams.slice(1)).toEqual([
+      { index: 10000, label: "EN · SRT file", language: "eng", isDefault: false, isForced: false, isTextBased: true, isExternal: true },
+      { index: 10001, label: "FR · SRT file", language: "fra", isDefault: false, isForced: false, isTextBased: true, isExternal: true },
+    ]);
+  });
+
+  it("plays a subtitle file without touching how the video is delivered, and serves it as WebVTT", async () => {
+    const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES, subtitleStreamIndex: 10000 } });
+    expect(started.json()).toMatchObject({ mode: "direct-play", url: "/api/playback/film/file", subtitleUrl: "/api/playback/film/subtitles/external/sub-en.vtt" });
+    const vtt = await app.inject({ method: "GET", url: "/api/playback/film/subtitles/external/sub-en.vtt", headers });
+    expect(vtt.statusCode).toBe(200);
+    expect(vtt.headers["content-type"]).toBe("text/vtt; charset=utf-8");
+    expect(vtt.body).toContain("WEBVTT");
+    expect(extractCalls.at(-1)).toEqual({ index: 0, charset: undefined });
+  });
+
+  it("tells ffmpeg the encoding of a subtitle file that isn't UTF-8", async () => {
+    await app.inject({ method: "GET", url: "/api/playback/film/subtitles/external/sub-fr.vtt", headers });
+    expect(extractCalls.at(-1)?.index).toBe(0);
+    expect(extractCalls.at(-1)?.charset).toMatch(/1252|8859/i);
+  });
+
+  it("keeps the chosen subtitle file through a seek, and ignores an index that doesn't exist", async () => {
+    const started = (await app.inject({ method: "POST", url: "/api/playback/e1/start", headers, payload: { capabilities: CAPABILITIES } })).json();
+    expect(started.subtitleUrl).toBeNull();
+    // e1 has only an unreadable file recorded, which the info lists but can't be served.
+    const withFile = (await app.inject({ method: "POST", url: "/api/playback/e1/start", headers, payload: { capabilities: CAPABILITIES, subtitleStreamIndex: 10000 } })).json();
+    expect(withFile.subtitleUrl).toBe("/api/playback/e1/subtitles/external/sub-gone.vtt");
+    const seeked = (await app.inject({ method: "POST", url: "/api/playback/e1/seek", headers, payload: { transcodeId: withFile.transcodeId, seconds: 300 } })).json();
+    expect(seeked.subtitleUrl).toBe("/api/playback/e1/subtitles/external/sub-gone.vtt");
+    const missing = (await app.inject({ method: "POST", url: "/api/playback/e1/start", headers, payload: { capabilities: CAPABILITIES, subtitleStreamIndex: 10005 } })).json();
+    expect(missing.subtitleUrl).toBeNull();
+  });
+
+  it("won't serve a subtitle file for another unit, or one that's gone from disk", async () => {
+    expect((await app.inject({ method: "GET", url: "/api/playback/e1/subtitles/external/sub-en.vtt", headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/api/playback/e1/subtitles/external/sub-gone.vtt", headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/api/playback/film/subtitles/external/nope.vtt", headers })).statusCode).toBe(404);
   });
 
   it("starts an HLS transcode for an unsupported container, with a sidecar subtitle offset to its start", async () => {
@@ -469,6 +540,7 @@ describe("browse, playback and progress routes", () => {
     expect(info).toMatchObject({ durationSeconds: 1000, next: { id: "e2" }, title: { id: "show" }, normalization: null });
     expect(info.subtitleStreams).toEqual([
       { index: 2, label: "ENG · SUBRIP", language: "eng", isDefault: false, isForced: false, isTextBased: true },
+      { index: 10000, label: "EN · SRT file", language: "eng", isDefault: false, isForced: false, isTextBased: true, isExternal: true },
     ]);
   });
 });

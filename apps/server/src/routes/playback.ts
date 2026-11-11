@@ -1,6 +1,8 @@
+import { readFile } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import send from "@fastify/send";
 import {
+  EXTERNAL_SUBTITLE_INDEX_BASE,
   isCompletedPosition,
   isPlayable,
   type FileHealthRepository,
@@ -12,6 +14,9 @@ import {
   type PlaybackSessionResponse,
   type PlaybackStatsResponse,
   type ServerSettingsRepository,
+  type StreamOption,
+  type SubtitleFile,
+  type SubtitleRepository,
   type Unit,
   type WatchProgressRepository,
 } from "@tessatv/domain";
@@ -29,6 +34,7 @@ import {
   TranscodeCapacityError,
   type TranscodeManager,
 } from "@tessatv/streaming";
+import { detectEncoding, toThreeLetterLanguage } from "@tessatv/subtitles";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { LRUCache } from "lru-cache";
@@ -47,9 +53,13 @@ export interface PlaybackDependencies {
   readonly loudnessRepository?: LoudnessRepository;
   /** Optional: without it every file is trusted, as before the decode check existed. */
   readonly fileHealthRepository?: FileHealthRepository;
+  /** Optional: without it only subtitle tracks inside the file are offered. */
+  readonly subtitleRepository?: SubtitleRepository;
   /** Test seams. */
   readonly probe?: (path: string) => Promise<MediaProbe>;
-  readonly extractSubtitles?: (path: string, streamIndex: number) => Promise<string>;
+  readonly extractSubtitles?: (path: string, streamIndex: number, inputCharset?: string) => Promise<string>;
+  /** Test seam: reads a subtitle file's bytes to tell its encoding. */
+  readonly readSubtitleFile?: (path: string) => Promise<Uint8Array>;
 }
 
 const videoCodecSupport = z.object({
@@ -147,10 +157,36 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
     max: 500,
     fetchMethod: (path) => (deps.probe ?? probeMedia)(path),
   });
-  const subtitles = new LRUCache<string, string, { path: string; index: number }>({
+  const subtitles = new LRUCache<string, string, { path: string; index: number; inputCharset?: string }>({
     max: 20,
-    fetchMethod: (_key, _stale, { context }) => (deps.extractSubtitles ?? extractWebVtt)(context.path, context.index),
+    fetchMethod: (_key, _stale, { context }) =>
+      (deps.extractSubtitles ?? ((path, index, inputCharset) => extractWebVtt(path, index, inputCharset ? { inputCharset } : {})))(
+        context.path,
+        context.index,
+        context.inputCharset,
+      ),
   });
+  // Which subtitle file a transcode was started with, so a seek (which only restarts ffmpeg) can
+  // hand the same one back. Bounded: transcodes come and go without telling this.
+  const externalChoices = new LRUCache<string, string>({ max: 200 });
+
+  /** Subtitle files beside the video, in a stable order, so their position in it is their index. */
+  async function externalSubtitles(unitId: string): Promise<SubtitleFile[]> {
+    const files = (await deps.subtitleRepository?.listForUnit(unitId)) ?? [];
+    return files.filter((file) => ["srt", "ass", "ssa", "vtt"].includes(file.format)).sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  function externalSubtitleUrl(unitId: string, file: SubtitleFile): string {
+    return `/api/playback/${unitId}/subtitles/external/${file.id}.vtt`;
+  }
+
+  /** Splits a chosen subtitle index into an embedded track for the plan, or a file served separately. */
+  async function resolveSubtitleChoice(unitId: string, index: number | undefined): Promise<{ embedded?: number; externalUrl?: string }> {
+    if (index === undefined) return {};
+    if (index < EXTERNAL_SUBTITLE_INDEX_BASE) return { embedded: index };
+    const file = (await externalSubtitles(unitId))[index - EXTERNAL_SUBTITLE_INDEX_BASE];
+    return file ? { externalUrl: externalSubtitleUrl(unitId, file) } : {};
+  }
 
   async function loadPlayable(unitId: string): Promise<{ unit: Unit; file: MediaFile } | null> {
     const unit = await libraryRepository.getUnit(unitId);
@@ -189,7 +225,7 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       url: `/api/transcodes/${transcode.id}/${transcode.session.id}/index.m3u8`,
       transcodeId: transcode.id,
       startTimeSeconds: transcode.startTimeSeconds,
-      subtitleUrl: subtitleUrl(unitId, transcode.plan),
+      subtitleUrl: subtitleUrl(unitId, transcode.plan) ?? externalChoices.get(transcode.id) ?? null,
       reasons: transcode.plan.reasons,
       fallbackLevel: transcode.plan.fallbackLevel,
       hasVideo: transcode.plan.video !== null,
@@ -272,14 +308,27 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
         language: stream.language,
         isDefault: stream.isDefault,
       })),
-      subtitleStreams: media.subtitleStreams.map((stream) => ({
-        index: stream.index,
-        label: `${streamLabel(stream)}${stream.isForced ? " · forced" : ""}${stream.isTextBased ? "" : " · burned in"}`,
-        language: stream.language,
-        isDefault: stream.isDefault,
-        isForced: stream.isForced,
-        isTextBased: stream.isTextBased,
-      })),
+      subtitleStreams: [
+        ...media.subtitleStreams.map((stream) => ({
+          index: stream.index,
+          label: `${streamLabel(stream)}${stream.isForced ? " · forced" : ""}${stream.isTextBased ? "" : " · burned in"}`,
+          language: stream.language,
+          isDefault: stream.isDefault,
+          isForced: stream.isForced,
+          isTextBased: stream.isTextBased,
+        })),
+        ...(await externalSubtitles(playable.unit.id)).map(
+          (file, position): StreamOption => ({
+            index: EXTERNAL_SUBTITLE_INDEX_BASE + position,
+            label: `${file.language.toUpperCase()}${file.forced ? " · forced" : ""}${file.hearingImpaired ? " · SDH" : ""} · ${file.format.toUpperCase()} file`,
+            language: toThreeLetterLanguage(file.language) ?? file.language,
+            isDefault: false,
+            isForced: file.forced,
+            isTextBased: true,
+            isExternal: true,
+          }),
+        ),
+      ],
       next: next ? unitSummary(next, null) : null,
       normalization:
         loudness?.integratedLufs != null
@@ -315,19 +364,24 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       // unless an admin turned the check off, which also sets its findings aside.
       const damaged = settings?.fileHealthCheck !== false && (await deps.fileHealthRepository?.get(playable.file.id))?.error != null;
       const startLevel = Math.max(request.body.fallbackLevel ?? 0, damaged ? DAMAGED_FILE_FALLBACK_LEVEL : 0) as FallbackLevel;
+      const subtitle = await resolveSubtitleChoice(playable.unit.id, subtitleStreamIndex);
       try {
-        return await startStream(
+        const response = await startStream(
           playable.unit.id,
           media,
           capabilities,
           {
             startSeconds: startSeconds ?? 0,
             ...(audioStreamIndex !== undefined ? { audioStreamIndex } : {}),
-            ...(subtitleStreamIndex !== undefined ? { subtitleStreamIndex } : {}),
+            ...(subtitle.embedded !== undefined ? { subtitleStreamIndex: subtitle.embedded } : {}),
             ...(maxHeight !== undefined ? { maxHeight } : {}),
           },
           startLevel,
         );
+        if (!subtitle.externalUrl) return response;
+        // A subtitle file never changes how the video is delivered; it just rides along.
+        if (response.transcodeId) externalChoices.set(response.transcodeId, subtitle.externalUrl);
+        return { ...response, subtitleUrl: subtitle.externalUrl };
       } catch (error) {
         if (error instanceof TranscodeCapacityError) return reply.code(503).send({ error: "busy", message: error.message });
         if (error instanceof UnplayableError) return reply.code(422).send({ error: "unplayable", message: error.message });
@@ -423,6 +477,27 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
         return reply.code(404).send({ error: "not_found" });
       }
       const vtt = await subtitles.fetch(`${index}:${playable.file.path}`, { context: { path: playable.file.path, index } });
+      return reply.header("content-type", "text/vtt; charset=utf-8").send(vtt);
+    },
+  );
+
+  app.get(
+    "/api/playback/:unitId/subtitles/external/:file",
+    { schema: { params: z.object({ unitId: z.string(), file: z.string().regex(/^[\w-]+\.vtt$/) }) } },
+    async (request, reply) => {
+      const record = await deps.subtitleRepository?.get(request.params.file.replace(/\.vtt$/, ""));
+      if (!record || record.unitId !== request.params.unitId) return reply.code(404).send({ error: "not_found" });
+      let bytes: Uint8Array;
+      try {
+        bytes = await (deps.readSubtitleFile ?? readFile)(record.path);
+      } catch {
+        return reply.code(404).send({ error: "file_unavailable", message: "The subtitle file is gone" });
+      }
+      // Downloaded files are UTF-8 already; ones put there by hand may not be, and ffmpeg must be told.
+      const encoding = detectEncoding(bytes);
+      const vtt = await subtitles.fetch(`ext:${record.id}:${record.createdAt.getTime()}:${record.path}`, {
+        context: { path: record.path, index: 0, ...(encoding === "utf-8" ? {} : { inputCharset: encoding }) },
+      });
       return reply.header("content-type", "text/vtt; charset=utf-8").send(vtt);
     },
   );

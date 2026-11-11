@@ -1,8 +1,10 @@
-import { rename, writeFile } from "node:fs/promises";
+import { readdir, rename, writeFile } from "node:fs/promises";
 import type { AppConfig } from "@tessatv/config";
 import type { LibraryRepository, SubtitleRepository } from "@tessatv/domain";
 import { probeMedia } from "@tessatv/streaming";
 import {
+  discoverSidecars,
+  type SidecarDiscoverySummary,
   movieHash,
   normalizeLanguage,
   OpenSubtitlesProvider,
@@ -71,5 +73,21 @@ export function createSubtitleSweep(deps: SubtitleJobDeps): (() => Promise<Subti
       // Finishes inside pg-boss's default 15-minute job expiry, like the loudness scan.
       budgetMs: 10 * 60 * 1000,
       onError: (error, unitId) => deps.warn({ unitId, error: error instanceof Error ? error.message : String(error) }, "subtitle fetch failed"),
+    });
+}
+
+/** The scheduled "match the subtitle records to what is on disk" run. */
+export function createSubtitleDiscovery(deps: Pick<SubtitleJobDeps, "subtitles" | "warn">): () => Promise<SidecarDiscoverySummary> {
+  return () =>
+    discoverSidecars({
+      subtitles: deps.subtitles,
+      listDirectory: async (directory) => {
+        try {
+          return await readdir(directory);
+        } catch (error) {
+          deps.warn({ directory, error: error instanceof Error ? error.message : String(error) }, "couldn't read a directory for subtitle files");
+          return null;
+        }
+      },
     });
 }

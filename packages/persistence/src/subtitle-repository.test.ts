@@ -67,6 +67,15 @@ describe("DrizzleSubtitleRepository", () => {
     expect(await ids()).toEqual([]);
   });
 
+  it("lists every playable file and every recorded subtitle", async () => {
+    const v = await video(new Date());
+    const gone = await video(new Date(), "missing");
+    await subtitles.add(file(v));
+    expect((await subtitles.listPlayableFiles()).map((w) => w.unitId)).toContain(v.unitId);
+    expect((await subtitles.listPlayableFiles()).map((w) => w.unitId)).not.toContain(gone.unitId);
+    expect((await subtitles.listAll()).map((f) => f.unitId)).toContain(v.unitId);
+  });
+
   it("holds a slot back until its retry time, and clears the wait when the slot is filled", async () => {
     const v = await video(new Date(Date.now() + 366 * 24 * 3600 * 1000));
     const slot = { language: "fr", forced: false };
