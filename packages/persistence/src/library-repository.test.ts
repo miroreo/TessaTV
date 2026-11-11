@@ -68,3 +68,49 @@ describe("DrizzleLibraryRepository.updateNode", () => {
     expect((await repository.getNode(node.id))?.sourceAliases).toEqual(["Show.Name", "Show Name (US)"]);
   });
 });
+
+describe("DrizzleLibraryRepository listings", () => {
+  it("listChildren returns each child with only its own external ids", async () => {
+    const parent = fakeNode({ id: randomUUID() });
+    const withIds = fakeNode({ id: randomUUID(), parentId: parent.id });
+    const without = fakeNode({ id: randomUUID(), parentId: parent.id });
+    const elsewhere = fakeNode({ id: randomUUID() });
+    const tvdb = (entityId: string, providerId: string) => ({ provider: "tvdb", entityType: "library_node" as const, entityId, providerId });
+    for (const node of [parent, without]) await repository.createNode(node);
+    await repository.createNode({ ...withIds, externalIds: [tvdb(withIds.id, "42")] });
+    await repository.createNode({ ...elsewhere, externalIds: [tvdb(elsewhere.id, "99")] });
+    createdIds.push(parent.id, withIds.id, without.id, elsewhere.id);
+
+    const children = await repository.listChildren(parent.id);
+
+    expect(children.map((child) => [child.id, child.externalIds.map((id) => id.providerId)]).sort()).toEqual(
+      [[withIds.id, ["42"]], [without.id, []]].sort(),
+    );
+  });
+
+  it("listUnits returns each unit with its own external ids", async () => {
+    const node = fakeNode({ id: randomUUID(), kind: "leaf", mediaType: "movie" });
+    await repository.createNode(node);
+    createdIds.push(node.id);
+    const now = new Date();
+    const unit = (id: string, providerId: string | null) => ({
+      id,
+      libraryNodeId: node.id,
+      mediaType: "movie",
+      title: id,
+      sequence: { path: [] },
+      externalIds: providerId ? [{ provider: "tmdb", entityType: "unit" as const, entityId: id, providerId }] : [],
+      availability: "missing" as const,
+      mediaFileId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const [a, b] = [unit(randomUUID(), "7"), unit(randomUUID(), null)];
+    await repository.createUnit(a);
+    await repository.createUnit(b);
+
+    const units = await repository.listUnits(node.id);
+
+    expect(units.map((entry) => [entry.id, entry.externalIds.map((id) => id.providerId)]).sort()).toEqual([[a.id, ["7"]], [b.id, []]].sort());
+  });
+});

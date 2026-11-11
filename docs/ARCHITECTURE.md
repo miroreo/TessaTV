@@ -618,6 +618,14 @@ It exists because a leak (~170 MB/min on the owner's server, from ~25 s after st
 traffic needed) never reproduced locally or in a synthetic 9,000-episode library scan, so
 the evidence has to come out of the leaking process itself.
 
+**Scan query fan-out and unbounded paging** (leak review, 2026-11-11): `listChildren` and
+`listUnits` used to run one `external_id` query per row, and the importer lists the library root
+once per movie, so a scan queued millions of queries in the pg pool (the scan runs ~25 s after
+boot via pg-boss's `missed: "once"`, matching the leak's timing). They now load a whole
+listing's external ids in one query (`loadExternalIdsGrouped`). `TvdbClient.getAllPages` also
+throws if `links.next` doesn't advance or passes 200 pages, instead of collecting forever.
+Neither is confirmed as the leak — only the diagnostics capture will say.
+
 **Volume normalization** (on by default, toggle in the player, remembered per browser):
 the `loudness-scan` job (pg-boss, every 15 min, ≤10 min per run so it fits pg-boss's job
 expiry) measures each file's default audio stream with ffmpeg's `ebur128` filter (EBU R128 /
