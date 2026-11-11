@@ -13,6 +13,12 @@ Built from the repo root by `docker/Dockerfile`:
 docker build -f docker/Dockerfile -t tessatv .          # or: podman build ...
 ```
 
+CI (`.github/workflows/publish-image.yml`) also publishes it to GitHub Container Registry:
+`ghcr.io/miroreo/tessatv:latest` on every push to `master`, `:sha-<short>` for each commit,
+and `:1.2.3` / `:1.2` for `v*` tags. Pull requests only build it. It is `linux/amd64` only.
+The package is private until you make it public (GitHub → Packages → Package settings);
+pulling a private one needs `docker login ghcr.io` with a token that has `read:packages`.
+
 What it does, so the run options below make sense:
 
 - Serves on **8096** (`PORT`), Jellyfin's port, on all interfaces.
