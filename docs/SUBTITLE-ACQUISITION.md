@@ -1,6 +1,10 @@
 # Subtitle acquisition — plan
 
-Status: **planning only, nothing built** (drafted 2026-11-11). Nothing here is a locked decision
+Status: **S1 in progress** (plan drafted 2026-11-11; the owner said to start building it, so the
+"build it in" answer to Q1 is taken). `packages/subtitles` now has the provider port, scorer,
+language normalization, sidecar naming, file hash and an OpenSubtitles adapter, with tests.
+Still to do for S1: charset/archive normalization, the service with throttling, persistence,
+job payloads, import hook. Nothing here is a locked decision
 until the owner confirms it; the "Open questions" section lists what needs an answer.
 
 > **Verification caveat.** This was written from the repo plus prior knowledge of the provider
@@ -47,13 +51,13 @@ The repo rule is: check for a maintained library before writing anything by hand
 |---|---|---|
 | Whole feature, zero code | **Bazarr** (Python service; subtitle manager for Sonarr/Radarr, ~20 providers, scoring, language profiles). Writes sidecar files next to media. | Real option — see Q1. Needs Sonarr/Radarr or a path mapping; GPL; separate container; no TessaTV integration beyond picking up the files it writes. [verify current status] |
 | Provider logic | **subliminal** (Python lib, many providers, scoring) | Python; we'd have to shell out or run a service. Not a fit for a Node process. |
-| OpenSubtitles client | `opensubtitles.com` npm wrapper (and older `opensubtitles-api`, which targets the deprecated v1 XML-RPC API) | The REST API is ~3 endpoints (`/login`, `/subtitles`, `/download`). With **ky** already in the repo (used for TMDB/TVDB) a thin client is smaller than a dependency we'd have to audit. Evaluate the wrapper's maintenance first; default: use **ky**. [verify] |
+| OpenSubtitles client | `opensubtitles.com` npm wrapper (and older `opensubtitles-api`, which targets the deprecated v1 XML-RPC API) | The REST API is ~3 endpoints (`/login`, `/subtitles`, `/download`). With **ky** already in the repo (used for TMDB/TVDB) a thin client is smaller than a dependency we'd have to audit. Checked on npm 2026-11-11: `opensubtitles.com` is 9 KB, plain JS, last published Feb 2024; `opensubtitles-api` targets the old API and was last published 2022. **Decided: ky.** |
 | Subdl, SubSource, Jimaku clients | none worth using | Thin **ky** clients behind our own `SubtitleProvider` port, same pattern as `TmdbClient`. |
 | Format conversion SRT/ASS → WebVTT | **ffmpeg** (already a hard dependency; `extractWebVtt` already does it) | Reuse. ffmpeg takes a subtitle *file* as `-i` just as well as a stream in a container. No new dependency. |
 | Parsing/cleaning cues (strip ads, "watermark" lines, SDH tags) | `subtitle` (npm, SRT/WebVTT parse/stringify) [verify maintenance]; `subsrt-ts` | Only if we decide to post-process. Not needed for v1. |
 | Charset detection (many SRTs are cp1252, cp1250, GBK…) | **chardet** / `jschardet` + **iconv-lite** | Needed: ffmpeg assumes UTF-8 and mangles others. Use libs, don't hand-roll. |
 | Archive extraction (Subdl, Podnapisi deliver ZIPs) | **fflate** or **yauzl** | Use a lib. |
-| OpenSubtitles file hash (64-bit sum of size + first/last 64 KiB) | tiny npm packages exist | ~20 lines; prefer a maintained package if one exists, else hand-roll with a test against the published reference vectors. Justify in a comment. |
+| OpenSubtitles file hash (64-bit sum of size + first/last 64 KiB) | tiny npm packages exist | ~20 lines; Checked 2026-11-11: no maintained npm package (`moviehash`, `opensubtitles-hash` don't exist). Hand-rolled in `movie-hash.ts`, tested against a synthetic file. |
 | Language codes (ISO 639-1/2/3, BCP 47) | `iso-639-3`, `bcp-47` | Use a lib; providers disagree (`en`, `eng`, `pt-BR`, `zh-TW`). |
 | Rate limiting / quota | **bottleneck** or `p-throttle` | Use a lib, one limiter per provider. |
 | Scoring | none (subliminal/Bazarr's are Python) | Hand-written pure function; ~60 lines + table. It encodes our policy. Reuse `@ctrl/video-filename-parser` to parse the subtitle's release string and the video's name. |
@@ -152,7 +156,7 @@ measurements):
 | runtime within tolerance of our duration (when the provider reports it) | +5; wildly off −50 |
 
 A file-hash hit is accepted without release-name agreement; everything else must reach a
-minimum (proposal: 60% of the maximum achievable for that query). Below it: record "no
+minimum (implemented as an absolute 60 points, `MIN_ACCEPTED_SCORE`). Below it: record "no
 acceptable match", don't download. The scorer is a pure function with a table-driven test.
 We parse both release strings with `@ctrl/video-filename-parser`, the lib already in use.
 

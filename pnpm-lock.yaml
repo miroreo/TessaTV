@@ -400,6 +400,21 @@ importers:
         specifier: ^10.2.1
         version: 10.2.1
 
+  packages/subtitles:
+    dependencies:
+      '@ctrl/video-filename-parser':
+        specifier: ^5.12.0
+        version: 5.12.0
+      '@tessatv/domain':
+        specifier: workspace:*
+        version: link:../domain
+      iso-639-3:
+        specifier: ^3.0.1
+        version: 3.0.1
+      ky:
+        specifier: ^2.2.0
+        version: 2.2.0
+
 packages:
 
   '@boundaries/elements@1.2.0':
@@ -2695,6 +2710,9 @@ packages:
   isexe@3.1.5:
     resolution: {integrity: sha512-6B3tLtFqtQS4ekarvLVMZ+X+VlvQekbe4taUkf/rhVO3d/h0M2rfARm/pXLcPEsjjMsFgrFgSrhQIxcSVrBz8w==}
     engines: {node: '>=18'}
+
+  iso-639-3@3.0.1:
+    resolution: {integrity: sha512-SdljCYXOexv/JmbQ0tvigHN43yECoscVpe2y2hlEqy/CStXQlroPhZLj7zKLRiGqLJfw8k7B973UAMDoQczVgQ==}
 
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
@@ -5378,6 +5396,8 @@ snapshots:
   isexe@2.0.0: {}
 
   isexe@3.1.5: {}
+
+  iso-639-3@3.0.1: {}
 
   jiti@2.7.0: {}
 
