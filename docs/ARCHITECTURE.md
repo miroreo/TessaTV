@@ -414,6 +414,9 @@ movie-duplicate merging would need a file-selection policy this doesn't attempt.
 
 ### Acquisition subsystem (not yet built)
 
+Subtitle acquisition (the first acquisition feature, planned before video) has its own plan:
+`docs/SUBTITLE-ACQUISITION.md`. Nothing in it is decided yet.
+
 One `Indexer` port (`search`, `fetchDownloadPayload`, `capabilities`) and one
 `DownloadClient` port (`add`, `getStatus`, `remove`), each implemented by torrent and
 Usenet adapters. Torznab and Newznab are the same underlying XML protocol, so both indexer
