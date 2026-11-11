@@ -39,6 +39,8 @@ Environment (validated at startup by `packages/config`; a bad value stops the se
 | `VAAPI_DEVICE` | no | Defaults to `/dev/dri/renderD128`. |
 | `VAAPI_HARDWARE_DECODE` | no | `false` (default): the CPU decodes and the GPU only encodes, because corrupt input can hang a GPU decoder and freeze the machine. `true` decodes on the GPU too (faster for 4K). |
 | `MAX_CONCURRENT_TRANSCODES` | no | Default 3. |
+| `DIAGNOSTICS_DIR` | no | Turns on memory diagnostics (below) and says where their files go. Off by default. |
+| `DIAGNOSTICS_CAPTURE_AT_MB` | no | With diagnostics on: the JS heap size at which a heap profile and snapshot are written, once. Default 1024. |
 
 Media is mounted **read-only at the same path as on the host**, so the folder paths you
 enter on the Settings page are the same inside and outside the container.
@@ -215,3 +217,32 @@ use `--tmpfs=/transcodes`), add `"--network=host"` to `extraOptions`, and put
 `DATABASE_URL=postgres://tessatv:<password>@127.0.0.1:5432/tessatv` in the secrets file
 rather than in `environment`. Postgres's default `listen_addresses` is `localhost`, so this
 needs no `enableTCPIP`.
+
+## Finding a memory leak
+
+Set `DIAGNOSTICS_DIR` to a directory the app can write to (in the container, the mounted
+`/transcodes` works) and restart. Nothing else changes, and it's off without that variable:
+
+- Every 30 seconds the log gets a `memory` line: JS heap used / total / limit, RSS, and the
+  size of each V8 heap space. A leak shows up as `heapUsedMb` climbing without coming back down.
+- V8's sampling heap profiler runs, recording the call stack that allocated memory. Its
+  profile covers what is **still alive**, so it names the code that created whatever is piling up.
+- The first time the heap reaches `DIAGNOSTICS_CAPTURE_AT_MB`, the server writes
+  `heap-<time>.heapprofile` and `heap-<time>.heapsnapshot` to the directory, once. The
+  snapshot blocks the process for several seconds and is about as large as the heap, so
+  set the threshold well under the limit (the default is 1 GB; V8's limit is ~4 GB here).
+- Admins can capture on demand: `GET /api/diagnostics/memory`, `POST
+  /api/diagnostics/heap-profile`, `POST /api/diagnostics/heap-snapshot`.
+
+A snapshot contains everything in the process's memory, including session tokens and
+settings: don't share one publicly.
+
+Reading the files (all open source):
+
+- **`.heapprofile`**: open it in Chrome DevTools (Memory tab → *Load profile*) or
+  [speedscope](https://www.speedscope.app). The biggest self-size entries are the allocation
+  sites holding live memory.
+- **`.heapsnapshot`**: load it in Chrome DevTools (Memory tab → *Load*) and sort by
+  *Retained size*; the *Retainers* pane shows what keeps an object alive. The open-source
+  [memlab](https://facebook.github.io/memlab/) can also analyse snapshot files (see its docs
+  for the leak-finding commands; not yet tried on this app's snapshots).

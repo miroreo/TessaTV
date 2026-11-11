@@ -168,7 +168,15 @@ export class TranscodeManager {
 
     await entry.session.dispose();
     entry.generation += 1;
-    const { session, accel, hardwareError } = await this.launch(id, entry.generation, entry.plan, seconds, entry.accel);
+    let launched;
+    try {
+      launched = await this.launch(id, entry.generation, entry.plan, seconds, entry.accel);
+    } catch (error) {
+      // The old session is disposed and there's no new one; don't leave a dead entry to be handed out.
+      await this.end(id);
+      throw error;
+    }
+    const { session, accel, hardwareError } = launched;
     entry.session = session;
     entry.accel = accel;
     entry.startTimeSeconds = seconds;

@@ -610,6 +610,14 @@ so playback still wins any contention for the CPU. It's read like the on/off set
 a change restarts the file in progress so it takes effect immediately (the decode of that
 file starts over). It doesn't switch itself off.
 
+**Memory diagnostics** (`apps/server/src/diagnostics.ts`, opt-in via `DIAGNOSTICS_DIR`, how-to
+in `docs/DEPLOYMENT.md`): built on Node's own `v8` and `inspector` modules. A timer logs heap
+numbers; V8's sampling heap profiler stays on; and the first time the heap passes
+`DIAGNOSTICS_CAPTURE_AT_MB` a live-allocation profile and a full heap snapshot are written.
+It exists because a leak (~170 MB/min on the owner's server, from ~25 s after startup, no
+traffic needed) never reproduced locally or in a synthetic 9,000-episode library scan, so
+the evidence has to come out of the leaking process itself.
+
 **Volume normalization** (on by default, toggle in the player, remembered per browser):
 the `loudness-scan` job (pg-boss, every 15 min, ≤10 min per run so it fits pg-boss's job
 expiry) measures each file's default audio stream with ffmpeg's `ebur128` filter (EBU R128 /

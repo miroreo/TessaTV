@@ -32,7 +32,7 @@ export interface CommandRunOptions {
   readonly signal?: AbortSignal;
   /** Kills the command after this long. */
   readonly timeoutMs?: number;
-  /** Called with stdout as it arrives, for live progress; the full output is still returned at the end. */
+  /** Called with stdout as it arrives, for live progress. stdout is then not kept: the result's `stdout` is empty. */
   readonly onStdout?: (chunk: string) => void;
 }
 
@@ -42,11 +42,16 @@ export interface CommandRunOptions {
  */
 export type CommandRunner = (command: string, args: readonly string[], options?: CommandRunOptions) => Promise<CommandResult>;
 
+/** More stderr than this is cut off (and ffmpeg stopped), so a badly damaged file can't fill memory with errors. */
+const MAX_STDERR_CHARS = 4 * 1024 * 1024;
+
 export const runCommand: CommandRunner = async (command, args, options = {}) => {
   const subprocess = execa(command, args, {
     reject: false,
     stripFinalNewline: false,
-    maxBuffer: 64 * 1024 * 1024,
+    maxBuffer: { stdout: 64 * 1024 * 1024, stderr: MAX_STDERR_CHARS },
+    // Streamed output is consumed by the listener; keeping a second copy only grows with run length.
+    ...(options.onStdout ? { buffer: { stdout: false } } : {}),
     ...(options.signal ? { cancelSignal: options.signal } : {}),
     ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
   });
@@ -56,7 +61,11 @@ export const runCommand: CommandRunner = async (command, args, options = {}) => 
     subprocess.stdout.on("data", (chunk: string) => onStdout(chunk));
   }
   const result = await subprocess;
+  // Flooded stderr: the process was stopped, but what it printed so far is the answer.
+  if (result.isMaxBuffer && result.exitCode === undefined && result.stderr.length >= MAX_STDERR_CHARS) {
+    return { exitCode: 1, stdout: result.stdout ?? "", stderr: result.stderr };
+  }
   // Spawn-level failure (e.g. binary not found), cancellation or timeout, not a non-zero exit.
   if (result.exitCode === undefined) throw result;
-  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+  return { exitCode: result.exitCode, stdout: result.stdout ?? "", stderr: result.stderr };
 };
