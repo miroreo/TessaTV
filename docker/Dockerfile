@@ -16,20 +16,21 @@ WORKDIR /repo
 
 FROM base AS build
 # `pnpm fetch` needs only the lockfile, so the download layer stays cached across
-# source-only changes; the install after it then runs offline.
+# source-only changes; the install after it reuses that store, and downloads anything missing
+# (a cached layer can be restored with an empty cache mount, e.g. in CI, so it must not be --offline).
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm fetch
 COPY . .
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm install --frozen-lockfile --offline
+    pnpm install --frozen-lockfile
 RUN pnpm turbo run build
 # Reinstall production dependencies only, into fresh node_modules (`--prod` over an existing
 # install leaves the dev packages in the virtual store), and drop build caches.
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     rm -rf node_modules apps/*/node_modules packages/*/node_modules \
       .turbo apps/*/.turbo packages/*/.turbo apps/web/.svelte-kit \
-  && pnpm install --frozen-lockfile --offline --prod
+  && pnpm install --frozen-lockfile --prod
 
 FROM ${NODE_IMAGE} AS runtime
 # ffmpeg/ffprobe for probing and transcoding. VAAPI drivers: Mesa covers AMD (and older
