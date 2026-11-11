@@ -1,7 +1,7 @@
 import type { ExternalId, LibraryNode, LibraryRepository, MediaFile, Unit, UnitLocation } from "@tessatv/domain";
 import { eq, isNull, sql } from "drizzle-orm";
 import type { Database } from "./db.js";
-import { loadExternalIds, replaceExternalIds } from "./external-id-store.js";
+import { loadExternalIds, loadExternalIdsGrouped, replaceExternalIds } from "./external-id-store.js";
 import { toDomainLibraryNode, toDomainMediaFile, toDomainUnit } from "./mappers.js";
 import { externalId as externalIdTable, libraryNode as libraryNodeTable, mediaFile as mediaFileTable, unit as unitTable, watchProgress } from "./schema.js";
 
@@ -16,14 +16,17 @@ export class DrizzleLibraryRepository implements LibraryRepository {
   }
 
   async listChildren(parentId: string | null): Promise<LibraryNode[]> {
-    const rows = await this.db
-      .select()
-      .from(libraryNodeTable)
-      .where(parentId === null ? isNull(libraryNodeTable.parentId) : eq(libraryNodeTable.parentId, parentId));
-
-    return Promise.all(
-      rows.map(async (row) => toDomainLibraryNode(row, await loadExternalIds(this.db, "library_node", row.id))),
+    const condition = parentId === null ? isNull(libraryNodeTable.parentId) : eq(libraryNodeTable.parentId, parentId);
+    const rows = await this.db.select().from(libraryNodeTable).where(condition);
+    if (rows.length === 0) return [];
+    // One query for every child's ids: the importer lists the root once per movie, so a query
+    // per child made a scan millions of queries long.
+    const ids = await loadExternalIdsGrouped(
+      this.db,
+      "library_node",
+      this.db.select({ id: libraryNodeTable.id }).from(libraryNodeTable).where(condition),
     );
+    return rows.map((row) => toDomainLibraryNode(row, ids.get(row.id) ?? []));
   }
 
   async createNode(node: LibraryNode): Promise<void> {
@@ -74,7 +77,13 @@ export class DrizzleLibraryRepository implements LibraryRepository {
 
   async listUnits(libraryNodeId: string): Promise<Unit[]> {
     const rows = await this.db.select().from(unitTable).where(eq(unitTable.libraryNodeId, libraryNodeId));
-    return Promise.all(rows.map(async (row) => toDomainUnit(row, await loadExternalIds(this.db, "unit", row.id))));
+    if (rows.length === 0) return [];
+    const ids = await loadExternalIdsGrouped(
+      this.db,
+      "unit",
+      this.db.select({ id: unitTable.id }).from(unitTable).where(eq(unitTable.libraryNodeId, libraryNodeId)),
+    );
+    return rows.map((row) => toDomainUnit(row, ids.get(row.id) ?? []));
   }
 
   async createUnit(unitValue: Unit): Promise<void> {

@@ -3,6 +3,9 @@ import { nullOn404, type QueryParams } from "./http.js";
 
 const DEFAULT_BASE_URL = "https://api4.thetvdb.com/v4";
 
+/** More pages than any real series has; stops a `links.next` that never ends from growing forever. */
+const MAX_PAGES = 200;
+
 export interface TvdbClientOptions {
   readonly apiKey: string;
   readonly baseUrl?: string;
@@ -71,7 +74,11 @@ export class TvdbClient {
     for (let page: number | null = 0; page !== null; ) {
       const body: TvdbEnvelope<D> = await this.http.get(path, { searchParams: { ...params, page: String(page) } }).json();
       items.push(...pick(body.data));
-      page = body.links?.next ?? null;
+      const next: number | null = body.links?.next ?? null;
+      // A next page that doesn't move forward (or too many pages) means the API isn't paging
+      // the way this expects; fail rather than collect the same page until memory runs out.
+      if (next !== null && (next <= page || next >= MAX_PAGES)) throw new Error(`TheTVDB paging for ${path} didn't advance (page ${page} -> ${next})`);
+      page = next;
     }
     return items;
   }

@@ -1,5 +1,5 @@
 import type { ExternalId, ExternalIdEntityType } from "@tessatv/domain";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, type SQLWrapper } from "drizzle-orm";
 import type { Database } from "./db.js";
 import { externalId as externalIdTable } from "./schema.js";
 
@@ -23,6 +23,35 @@ export async function loadExternalIds(
     entityId: row.entityId,
     providerId: row.providerId,
   }));
+}
+
+/**
+ * The external ids of many entities in one query, grouped by entity id. `entityIds` is a
+ * subquery selecting the ids (not a list), so listing a thousand children costs two queries
+ * rather than a thousand and one, with no bound on how many rows it covers.
+ */
+export async function loadExternalIdsGrouped(
+  db: Database,
+  entityType: ExternalIdEntityType,
+  entityIds: SQLWrapper,
+): Promise<Map<string, ExternalId[]>> {
+  const rows = await db
+    .select()
+    .from(externalIdTable)
+    .where(and(eq(externalIdTable.entityType, entityType), inArray(externalIdTable.entityId, entityIds)));
+
+  const grouped = new Map<string, ExternalId[]>();
+  for (const row of rows) {
+    const ids = grouped.get(row.entityId) ?? [];
+    ids.push({
+      provider: row.provider,
+      entityType: row.entityType as ExternalIdEntityType,
+      entityId: row.entityId,
+      providerId: row.providerId,
+    });
+    grouped.set(row.entityId, ids);
+  }
+  return grouped;
 }
 
 export async function replaceExternalIds(

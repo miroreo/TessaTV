@@ -148,6 +148,15 @@ describe("TvdbMetadataProvider", () => {
     expect(requestedUrl(fetchImpl, 2).searchParams.get("page")).toBe("1");
   });
 
+  it("fetchEpisodes gives up when the next page never advances, instead of collecting forever", async () => {
+    const stuck = () => fakeResponse({ status: "success", data: { episodes: [{ name: "Pilot", seasonNumber: 1, number: 1 }] }, links: { next: 0 } });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(fakeResponse(envelope({ token: "jwt" }))).mockImplementation(async () => stuck());
+    const provider = new TvdbMetadataProvider(new TvdbClient({ apiKey: "key", fetchImpl }));
+
+    await expect(provider.fetchEpisodes("247808")).rejects.toThrow(/didn't advance/);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("fetchEpisodes returns an empty list for an unknown series (404)", async () => {
     const fetchImpl = vi
       .fn()
