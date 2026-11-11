@@ -198,11 +198,20 @@ export class FileHealthMonitor {
     // Aborted by `stop()`, or by this check's own watcher when the setting is turned off or
     // full speed is switched, so a change takes effect on the file in progress, not the next one.
     const fullSpeed = this.fullSpeed;
-    const changed = new AbortController();
-    const signal = AbortSignal.any([this.abort.signal, changed.signal]);
+    // Linked by hand rather than `AbortSignal.any`, which can keep every per-file signal alive
+    // as long as `this.abort.signal` is.
+    const checkAbort = new AbortController();
+    const signal = checkAbort.signal;
+    let settingChanged = false;
+    const onStop = () => checkAbort.abort();
+    if (this.abort.signal.aborted) onStop();
+    else this.abort.signal.addEventListener("abort", onStop, { once: true });
     const watcher = setInterval(() => {
       void Promise.all([this.enabled(), this.readFullSpeed()]).then(([on, speed]) => {
-        if (!on || speed !== fullSpeed) changed.abort();
+        if (!on || speed !== fullSpeed) {
+          settingChanged = true;
+          checkAbort.abort();
+        }
       });
     }, this.options.enabledPollMs ?? 15_000);
     this.currentState = "checking";
@@ -219,16 +228,17 @@ export class FileHealthMonitor {
         },
         fullSpeed,
       );
-      if (signal.aborted) return changed.signal.aborted;
+      if (signal.aborted) return settingChanged;
       await this.options.repository.save({ mediaFileId: file.id, checkedAt: new Date(this.now()), sizeBytes: file.sizeBytes, error });
       this.options.onChecked?.(file.path, error);
     } catch (error) {
       // Stopped for good: no. A setting changed mid-check: yes, so the loop sees it at once.
-      if (signal.aborted) return changed.signal.aborted;
+      if (signal.aborted) return settingChanged;
       this.skipped.add(file.id);
       this.options.onError?.(file.path, error as Error);
     } finally {
       clearInterval(watcher);
+      this.abort.signal.removeEventListener("abort", onStop);
       this.current = null;
     }
     return true;
