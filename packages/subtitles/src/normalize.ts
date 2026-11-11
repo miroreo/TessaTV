@@ -36,8 +36,8 @@ function unpack(download: SubtitleDownload): { bytes: Uint8Array; fileName: stri
 /** Subtitles in the wild are UTF-8, UTF-16, cp1252, cp1250, GBK ...; ffmpeg assumes UTF-8 and mangles the rest. */
 function decode(bytes: Uint8Array): string {
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return Buffer.from(bytes.subarray(3)).toString("utf8");
-  if (bytes[0] === 0xff && bytes[1] === 0xfe) return iconv.decode(Buffer.from(bytes), "utf-16le").replace(/^﻿/, "");
-  if (bytes[0] === 0xfe && bytes[1] === 0xff) return iconv.decode(Buffer.from(bytes), "utf-16be").replace(/^﻿/, "");
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return iconv.decode(Buffer.from(bytes), "utf-16le").replace(/^\uFEFF/, "");
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return iconv.decode(Buffer.from(bytes), "utf-16be").replace(/^\uFEFF/, "");
 
   const strict = new TextDecoder("utf-8", { fatal: true });
   try {
