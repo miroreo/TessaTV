@@ -21,6 +21,7 @@ import {
 } from "@tessatv/persistence";
 import { FileHealthMonitor, measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
+import { MemoryDiagnostics } from "./diagnostics.js";
 import { LibraryScanner } from "./library-scanner.js";
 import { loadWebUiHandler } from "./routes/web-ui.js";
 
@@ -68,6 +69,18 @@ const transcodes = new TranscodeManager({
 });
 
 const availability = new DrizzleMediaAvailabilityRepository(db);
+
+// Opt-in (DIAGNOSTICS_DIR): logs heap numbers, runs the sampling heap profiler, and writes a
+// profile + snapshot when the heap first reaches DIAGNOSTICS_CAPTURE_AT_MB — for finding a leak.
+const diagnostics = config.DIAGNOSTICS_DIR
+  ? new MemoryDiagnostics({
+      directory: config.DIAGNOSTICS_DIR,
+      captureAtMb: config.DIAGNOSTICS_CAPTURE_AT_MB,
+      onReport: (report) => app.log.info(report, "memory"),
+      onCapture: (files) => app.log.warn(files, "memory diagnostics captured a heap profile and snapshot"),
+      onError: (error) => app.log.error(error, "memory diagnostics capture failed"),
+    })
+  : null;
 const libraryFolders = new DrizzleLibraryFolderRepository(db);
 const scanner = new LibraryScanner({
   folders: libraryFolders,
@@ -94,6 +107,7 @@ const app = buildApp({
   },
   libraryFolders: { folders: libraryFolders, scanner },
   fileHealth: { repository: fileHealthRepository, status: () => fileHealth.status() },
+  ...(diagnostics ? { diagnostics: { diagnostics } } : {}),
   settings: serverSettings,
   users,
   sso: {
@@ -188,6 +202,11 @@ app
     await transcodes.start();
     await jobs.start();
     fileHealth.start();
+    // A diagnostics failure (an unwritable directory, say) must not take the server down.
+    await diagnostics
+      ?.start()
+      .then(() => app.log.info({ directory: config.DIAGNOSTICS_DIR, captureAtMb: config.DIAGNOSTICS_CAPTURE_AT_MB }, "memory diagnostics on"))
+      .catch((error: Error) => app.log.error(error, "memory diagnostics couldn't start"));
   })
   .catch((error: unknown) => {
     app.log.error(error);
@@ -197,6 +216,6 @@ app
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     // Leaves no ffmpeg behind writing into a directory nothing will clean up until next boot.
-    void Promise.allSettled([transcodes.shutdown(), jobs.stop(), fileHealth.stop()]).finally(() => process.exit(0));
+    void Promise.allSettled([transcodes.shutdown(), jobs.stop(), fileHealth.stop(), diagnostics?.stop()]).finally(() => process.exit(0));
   });
 }

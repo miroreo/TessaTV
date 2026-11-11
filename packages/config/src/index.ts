@@ -17,6 +17,10 @@ const envSchema = z.object({
   VAAPI_HARDWARE_DECODE: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   TRANSCODE_DIR: z.string().min(1).default(join(tmpdir(), "tessatv-transcodes")),
   MAX_CONCURRENT_TRANSCODES: z.coerce.number().int().positive().default(3),
+  // Memory diagnostics, for chasing a leak: off unless a directory is given. See docs/DEPLOYMENT.md.
+  DIAGNOSTICS_DIR: z.string().min(1).optional(),
+  // The first time the JS heap reaches this size, a heap profile and snapshot are written.
+  DIAGNOSTICS_CAPTURE_AT_MB: z.coerce.number().int().positive().default(1024),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
