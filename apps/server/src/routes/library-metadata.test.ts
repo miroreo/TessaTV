@@ -135,6 +135,29 @@ describe("GET /api/library/:id/metadata/candidates", () => {
     expect(provider.search).toHaveBeenCalledWith({ title: "Some Movie", year: 1999, mediaKind: "movie" });
   });
 
+  it("searches by the source folder name, not a title an earlier identify overwrote", async () => {
+    const provider = fakeProvider();
+    const wrong = fakeNode({ title: "Wrong Canonical Name", sourceKey: "Real.Show.Name" });
+    const app = buildApp({ libraryRepository: new InMemoryLibraryRepository([wrong]), metadataProviders: { movie: provider } });
+
+    const response = await app.inject({ method: "GET", url: "/api/library/node-1/metadata/candidates" });
+
+    expect(provider.search).toHaveBeenCalledWith({ title: "Real Show Name", year: null, mediaKind: "movie" });
+    expect(response.json()).toMatchObject({ source: "Real.Show.Name", query: "Real Show Name" });
+  });
+
+  it("a typed ?query= replaces the folder-derived search", async () => {
+    const provider = fakeProvider();
+    const app = buildApp({
+      libraryRepository: new InMemoryLibraryRepository([fakeNode()]),
+      metadataProviders: { movie: provider },
+    });
+
+    await app.inject({ method: "GET", url: "/api/library/node-1/metadata/candidates?query=Other%20Film" });
+
+    expect(provider.search).toHaveBeenCalledWith({ title: "Other Film", year: null, mediaKind: "movie" });
+  });
+
   it("an explicit ?provider= override is used instead of the media-type default", async () => {
     const tmdb = fakeProvider("tmdb");
     const tvdb = fakeProvider("tvdb");
