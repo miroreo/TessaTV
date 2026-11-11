@@ -55,6 +55,7 @@ const metadataProviders: MetadataProvidersByKind = {
 // Resolved up front so a misconfigured explicit `vaapi` stops startup, not the first playback.
 const hardwareAccel = await selectHardwareAccel(config.HARDWARE_ACCEL, {
   ...(config.VAAPI_DEVICE ? { vaapiDevice: config.VAAPI_DEVICE } : {}),
+  vaapiHardwareDecode: config.VAAPI_HARDWARE_DECODE,
 });
 const transcodes = new TranscodeManager({
   directory: config.TRANSCODE_DIR,

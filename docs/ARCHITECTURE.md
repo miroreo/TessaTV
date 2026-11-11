@@ -456,7 +456,13 @@ that transcode stays on the CPU for its later seeks. Remuxes are never retried: 
 use the accel, so the CPU would fail identically. Verified with real ffmpeg against a
 nonexistent render node: playable on the CPU 0.7s later.
 
-Config: `HARDWARE_ACCEL` (`auto`/`none`/`vaapi`), `VAAPI_DEVICE`, `TRANSCODE_DIR`,
+**GPU decode is opt-in.** VAAPI decodes on the CPU and only encodes on the GPU unless
+`VAAPI_HARDWARE_DECODE=true`. Found on the owner's server (AMD Polaris): ffmpeg hit corrupt
+data mid-file, the UVD decoder ring timed out, the driver's GPU reset failed, and the whole
+machine hung — the fallback ladder never got a chance, since nothing in Node was running.
+The CPU decoder just reports an error on the same data.
+
+Config: `HARDWARE_ACCEL` (`auto`/`none`/`vaapi`), `VAAPI_DEVICE`, `VAAPI_HARDWARE_DECODE`, `TRANSCODE_DIR`,
 `MAX_CONCURRENT_TRANSCODES`.
 
 Hardware accel is a `HardwareAccel` strategy whose only job is producing a `VideoPipeline`

@@ -63,7 +63,10 @@ describe.skipIf(!ffmpegAvailable)("streaming against real ffmpeg", () => {
   });
 
   const accels: [string, () => HardwareAccel][] = [["software", () => new SoftwareAccel()]];
-  if (vaapi) accels.push(["vaapi", () => new VaapiAccel(vaapi, new SoftwareAccel())]);
+  if (vaapi) {
+    accels.push(["vaapi (CPU decode)", () => new VaapiAccel(vaapi, new SoftwareAccel())]);
+    accels.push(["vaapi (GPU decode)", () => new VaapiAccel(vaapi, new SoftwareAccel(), { hardwareDecode: true })]);
+  }
 
   it.each(accels)("transcodes to 8-bit H.264 + stereo AAC with %s", async (name, makeAccel) => {
     const plan = resolvePlaybackPlan(await probeMedia(samplePath), iosLikeCapabilities({ audioCodecs: [] }), {

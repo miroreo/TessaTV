@@ -73,6 +73,7 @@ describe("buildTranscodeArgs", () => {
     const accel = new VaapiAccel(
       { device: "/dev/dri/renderD128", encode: ["h264"], decode: [{ codec: "hevc", bitDepth: 10 }] },
       new SoftwareAccel(),
+      { hardwareDecode: true },
     );
     const args = buildTranscodeArgs(TRANSCODE_PLAN, accel, { directory: "/tmp/s", startTimeSeconds: 90 });
     const input = args.indexOf("-i");
@@ -103,6 +104,7 @@ describe("buildTranscodeArgs", () => {
     const vaapi = new VaapiAccel(
       { device: "/dev/dri/renderD128", encode: ["h264"], decode: [{ codec: "hevc", bitDepth: 10 }] },
       new SoftwareAccel(),
+      { hardwareDecode: true },
     );
     const args = buildTranscodeArgs({ ...TRANSCODE_PLAN, subtitle: { kind: "burn-in", streamIndex: 5 } }, vaapi, {
       directory: "/tmp/out",

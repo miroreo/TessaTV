@@ -47,7 +47,8 @@ describe("loadConfig", () => {
   });
 
   it("defaults transcoding settings, and rejects an unknown hardware accel mode", () => {
-    expect(loadConfig(validEnv)).toMatchObject({ HARDWARE_ACCEL: "auto", MAX_CONCURRENT_TRANSCODES: 3 });
+    expect(loadConfig(validEnv)).toMatchObject({ HARDWARE_ACCEL: "auto", MAX_CONCURRENT_TRANSCODES: 3, VAAPI_HARDWARE_DECODE: false });
+    expect(loadConfig({ ...validEnv, VAAPI_HARDWARE_DECODE: "true" }).VAAPI_HARDWARE_DECODE).toBe(true);
     expect(loadConfig(validEnv).TRANSCODE_DIR).toMatch(/tessatv-transcodes$/);
     expect(() => loadConfig({ ...validEnv, HARDWARE_ACCEL: "nvenc" })).toThrow(/HARDWARE_ACCEL/);
   });
