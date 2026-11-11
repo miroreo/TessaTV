@@ -1,13 +1,10 @@
+import type { SubtitleSlot } from "@tessatv/domain";
 import { filenameParse } from "@ctrl/video-filename-parser";
 import { primaryLanguage } from "./language.js";
 import type { SubtitleCandidate, SubtitleQuery } from "./subtitle-provider.js";
 
-/** What one fetch is trying to fill: a language, and what flavor of subtitle. */
-export interface SubtitleSlot {
-  /** Normalized, e.g. `en` or `pt-BR`. */
-  readonly language: string;
-  /** Wants a forced track (only the foreign-language parts) rather than a full one. */
-  readonly forced: boolean;
+/** What one fetch is trying to fill: a slot (language, forced or full) and how to treat SDH tracks. */
+export interface SubtitlePreference extends SubtitleSlot {
   readonly hearingImpaired: "prefer" | "avoid" | "any";
 }
 
@@ -89,7 +86,7 @@ function releaseSignals(candidate: SubtitleCandidate, query: SubtitleQuery): Sco
  * Scores one candidate for one slot, or returns null if it can never be right (another
  * language). Pure: the same inputs always rank the same way, which is what makes it testable.
  */
-export function scoreCandidate(candidate: SubtitleCandidate, query: SubtitleQuery, slot: SubtitleSlot): ScoredCandidate | null {
+export function scoreCandidate(candidate: SubtitleCandidate, query: SubtitleQuery, slot: SubtitlePreference): ScoredCandidate | null {
   if (primaryLanguage(candidate.language) !== primaryLanguage(slot.language)) return null;
 
   const signals: ScoreSignal[] = [...matchSignals(candidate, query)];
@@ -117,7 +114,7 @@ export function scoreCandidate(candidate: SubtitleCandidate, query: SubtitleQuer
 }
 
 /** Every candidate that could fit the slot, best first; ties go to the more downloaded one. */
-export function rankCandidates(candidates: readonly SubtitleCandidate[], query: SubtitleQuery, slot: SubtitleSlot): ScoredCandidate[] {
+export function rankCandidates(candidates: readonly SubtitleCandidate[], query: SubtitleQuery, slot: SubtitlePreference): ScoredCandidate[] {
   return candidates
     .flatMap((candidate) => scoreCandidate(candidate, query, slot) ?? [])
     .sort((a, b) => b.score - a.score || (b.candidate.downloadCount ?? 0) - (a.candidate.downloadCount ?? 0));

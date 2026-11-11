@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MIN_ACCEPTED_SCORE, rankCandidates, scoreCandidate, type SubtitleSlot } from "./score.js";
+import { MIN_ACCEPTED_SCORE, rankCandidates, scoreCandidate, type SubtitlePreference } from "./score.js";
 import type { SubtitleCandidate, SubtitleQuery } from "./subtitle-provider.js";
 
 const query: SubtitleQuery = {
@@ -12,7 +12,7 @@ const query: SubtitleQuery = {
   episode: 2,
   fileName: "Example.Show.S01E02.1080p.WEB-DL.x264-GRP.mkv",
 };
-const slot: SubtitleSlot = { language: "en", forced: false, hearingImpaired: "avoid" };
+const slot: SubtitlePreference = { language: "en", forced: false, hearingImpaired: "avoid" };
 
 function candidate(overrides: Partial<SubtitleCandidate> = {}): SubtitleCandidate {
   return {

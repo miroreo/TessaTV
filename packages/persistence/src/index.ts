@@ -9,3 +9,4 @@ export { DrizzleWatchProgressRepository } from "./watch-progress-repository.js";
 export { DrizzleAuthSessionRepository, DrizzleUserRepository } from "./user-repository.js";
 export * as schema from "./schema.js";
 export { DrizzleServerSettingsRepository } from "./server-settings-repository.js";
+export { DrizzleSubtitleRepository } from "./subtitle-repository.js";

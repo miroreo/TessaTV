@@ -1,12 +1,12 @@
 import { strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { QuotaExhaustedError, RateLimitedError } from "./errors.js";
-import type { SubtitleSlot } from "./score.js";
+import type { SubtitlePreference } from "./score.js";
 import { SubtitleService } from "./subtitle-service.js";
 import type { SubtitleCandidate, SubtitleProvider, SubtitleQuery } from "./subtitle-provider.js";
 
 const query: SubtitleQuery = { kind: "movie", languages: ["en"], externalIds: { tmdb: "1" }, title: "Movie", year: 2020, fileName: "Movie.2020.mkv" };
-const slot: SubtitleSlot = { language: "en", forced: false, hearingImpaired: "any" };
+const slot: SubtitlePreference = { language: "en", forced: false, hearingImpaired: "any" };
 const SRT = "1\n00:00:01,000 --> 00:00:02,000\nHello\n";
 
 function candidate(provider: string, providerId: string, overrides: Partial<SubtitleCandidate> = {}): SubtitleCandidate {

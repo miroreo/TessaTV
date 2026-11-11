@@ -221,3 +221,58 @@ export const serverSetting = pgTable("server_setting", {
   value: jsonb("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Subtitle files beside a unit's video — see `SubtitleFile`. The file on disk is what plays; this row says where it came from. */
+export const subtitleFile = pgTable(
+  "subtitle_file",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    unitId: uuid("unit_id")
+      .notNull()
+      .references(() => unit.id, { onDelete: "cascade" }),
+    mediaFileId: uuid("media_file_id")
+      .notNull()
+      .references(() => mediaFile.id, { onDelete: "cascade" }),
+    language: text("language").notNull(),
+    forced: boolean("forced").notNull().default(false),
+    hearingImpaired: boolean("hearing_impaired").notNull().default(false),
+    source: text("source").notNull(),
+    provider: text("provider"),
+    providerId: text("provider_id"),
+    score: integer("score"),
+    path: text("path").notNull(),
+    format: text("format").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("subtitle_file_path").on(table.path), index("subtitle_file_unit").on(table.unitId)],
+);
+
+/** When a slot (language, forced or not) was last searched without success, and when to look again. */
+export const subtitleSearch = pgTable(
+  "subtitle_search",
+  {
+    unitId: uuid("unit_id")
+      .notNull()
+      .references(() => unit.id, { onDelete: "cascade" }),
+    slotKey: text("slot_key").notNull(),
+    outcome: text("outcome").notNull(),
+    attempts: integer("attempts").notNull(),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull(),
+    retryAfter: timestamp("retry_after", { withTimezone: true }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.unitId, table.slotKey] })],
+);
+
+/** Candidates never offered again for a unit. */
+export const subtitleBlacklist = pgTable(
+  "subtitle_blacklist",
+  {
+    unitId: uuid("unit_id")
+      .notNull()
+      .references(() => unit.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    providerId: text("provider_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.unitId, table.provider, table.providerId] })],
+);

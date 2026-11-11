@@ -1,7 +1,7 @@
 import Bottleneck from "bottleneck";
 import { AuthFailedError, QuotaExhaustedError, RateLimitedError } from "./errors.js";
 import { normalizeSubtitle, type SubtitleFile } from "./normalize.js";
-import { rankCandidates, type ScoredCandidate, type SubtitleSlot } from "./score.js";
+import { rankCandidates, type ScoredCandidate, type SubtitlePreference } from "./score.js";
 import type { SubtitleProvider, SubtitleQuery } from "./subtitle-provider.js";
 
 export interface ProviderFailure {
@@ -58,7 +58,7 @@ export class SubtitleService {
     return times.length > 0 ? new Date(Math.min(...times)) : null;
   }
 
-  async search(query: SubtitleQuery, slot: SubtitleSlot): Promise<{ ranked: ScoredCandidate[]; failures: ProviderFailure[]; searched: number }> {
+  async search(query: SubtitleQuery, slot: SubtitlePreference): Promise<{ ranked: ScoredCandidate[]; failures: ProviderFailure[]; searched: number }> {
     const slotQuery: SubtitleQuery = { ...query, languages: [slot.language], forced: slot.forced };
     const failures: ProviderFailure[] = [];
     const active = this.providers.filter((provider) => !this.isPaused(provider.id));
@@ -77,7 +77,7 @@ export class SubtitleService {
   }
 
   /** Searches, then downloads the best candidate that is good enough and actually decodes. */
-  async fetchBest(query: SubtitleQuery, slot: SubtitleSlot): Promise<FetchOutcome> {
+  async fetchBest(query: SubtitleQuery, slot: SubtitlePreference): Promise<FetchOutcome> {
     const { ranked, failures, searched } = await this.search(query, slot);
     const accepted = ranked.filter((scored) => scored.accepted);
 
