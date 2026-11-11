@@ -18,6 +18,11 @@ describe("parseEpisodeFilename", () => {
     });
   });
 
+  it("doesn't mistake release tags after the quality info for the episode title", () => {
+    expect(parseEpisodeFilename("Suits.S01E04.720p.Web-DL.ReEnc-DeeJayAhmed.mkv")).toEqual({ season: 1, episode: 4, title: "Episode 4" });
+    expect(parseEpisodeFilename("Suits.S01E04.720p.WEB-DL.DD5.1.H.264-GRP.mkv")).toEqual({ season: 1, episode: 4, title: "Episode 4" });
+  });
+
   it("falls back to a generic 'Episode N' title when nothing is left after the SxxExx token", () => {
     expect(parseEpisodeFilename("Show.S01E01.720p.mkv")).toEqual({
       season: 1,
