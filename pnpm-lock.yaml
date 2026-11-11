@@ -235,6 +235,9 @@ importers:
       '@tessatv/streaming':
         specifier: workspace:*
         version: link:../../packages/streaming
+      '@tessatv/subtitles':
+        specifier: workspace:*
+        version: link:../../packages/subtitles
       '@tessatv/web':
         specifier: workspace:*
         version: link:../web

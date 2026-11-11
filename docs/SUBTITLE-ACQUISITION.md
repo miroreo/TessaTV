@@ -1,11 +1,17 @@
 # Subtitle acquisition — plan
 
-Status: **S1 in progress** (plan drafted 2026-11-11; the owner said to start building it, so the
-"build it in" answer to Q1 is taken). `packages/subtitles` now has the provider port, scorer,
-language normalization, sidecar naming, file hash and an OpenSubtitles adapter, with tests.
-Still to do for S1: charset/archive normalization, the service with throttling, persistence,
-job payloads, import hook. Nothing here is a locked decision
-until the owner confirms it; the "Open questions" section lists what needs an answer.
+Status (2026-11-11): **S1 built, not yet live-tested.** The owner said to start building, so
+the "build it in" answer to Q1 is taken. What exists: `packages/subtitles` (provider port,
+OpenSubtitles adapter, scorer, language normalization, charset/zip handling, file hash, sidecar
+naming, `SubtitleService` with throttling and pause-on-quota, `SubtitleAcquirer`, sweep), migration
+0015 and `DrizzleSubtitleRepository` (tested on a real Postgres), and a `subtitle-sweep` job in
+`apps/server` every 30 minutes. It is configured by env vars (`OPENSUBTITLES_*`,
+`SUBTITLE_LANGUAGES`, `SUBTITLE_HEARING_IMPAIRED`), not a settings page yet. Not built: playing
+downloaded subtitles in TessaTV's own player (S2: they're on disk, so Jellyfin/Plex/VLC see
+them), sidecar discovery in the scan, Subdl, settings/UI, per-unit queued jobs. Deviations from
+this plan: no `packages/jobs` payload extension yet (the sweep, newest first within a time
+budget, covers new imports; Q11 stays open for the later per-unit "search now"), and embedded
+tracks are checked with `probeMedia` inside the acquirer.
 
 > **Verification caveat.** This was written from the repo plus prior knowledge of the provider
 > APIs. The cloud container could not reach the providers' documentation pages (outbound proxy

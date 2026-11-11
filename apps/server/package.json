@@ -23,6 +23,7 @@
     "@tessatv/metadata": "workspace:*",
     "@tessatv/persistence": "workspace:*",
     "@tessatv/streaming": "workspace:*",
+    "@tessatv/subtitles": "workspace:*",
     "@tessatv/web": "workspace:*",
     "fastify": "^5.2.0",
     "fastify-type-provider-zod": "^7.0.0",

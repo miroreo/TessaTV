@@ -35,11 +35,13 @@ Environment (validated at startup by `packages/config`; a bad value stops the se
 | `DATABASE_URL` | yes | `postgres://user:pass@host:5432/db`, or a Unix socket: `postgresql://user@%2Frun%2Fpostgresql/db` |
 | `APP_SECRET` | yes | 32+ chars (`openssl rand -base64 32`). Derives the credential encryption key and the Jellyfin server id, so keep it stable. |
 | `TMDB_API_KEY`, `TVDB_API_KEY` | no | Metadata for movies / shows is disabled until set. |
+| `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD` | no | Subtitle downloads are off until all three are set. Subtitles are written **beside each video**, so the media mount must be writable (see below). |
+| `SUBTITLE_LANGUAGES`, `SUBTITLE_HEARING_IMPAIRED` | no | `en` and `avoid` by default; see `.env.example`. |
 | `HARDWARE_ACCEL` | no | `auto` (default: VAAPI if it works, else software), `none`, `vaapi` (fails startup if VAAPI doesn't work). |
 | `VAAPI_DEVICE` | no | Defaults to `/dev/dri/renderD128`. |
 | `MAX_CONCURRENT_TRANSCODES` | no | Default 3. |
 
-Media is mounted **read-only at the same path as on the host**, so the folder paths you
+Media is mounted **read-only at the same path as on the host** (drop `:ro` if you turn on subtitle downloads, which write `.srt` files beside the videos), so the folder paths you
 enter on the Settings page are the same inside and outside the container.
 
 For VAAPI, pass the render node (`--device /dev/dri/renderD128`) and add the device's group

@@ -15,11 +15,13 @@ import {
   DrizzleLoudnessRepository,
   DrizzleMediaAvailabilityRepository,
   DrizzleServerSettingsRepository,
+  DrizzleSubtitleRepository,
   DrizzleWatchProgressRepository,
   runMigrations,
 } from "@tessatv/persistence";
 import { measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
+import { createSubtitleSweep } from "./subtitle-job.js";
 import { LibraryScanner } from "./library-scanner.js";
 import { loadWebUiHandler } from "./routes/web-ui.js";
 
@@ -143,6 +145,25 @@ jobs.register({
     if (summary.measured || summary.failed) app.log.info(summary, "loudness-scan measured files");
   },
 });
+
+// Every 30 minutes, fill in missing subtitles (newest imports first; a miss is retried after 1, 3
+// and 7 days, then monthly). Off unless OpenSubtitles credentials are configured.
+const subtitleSweep = createSubtitleSweep({
+  config,
+  library: libraryRepository,
+  subtitles: new DrizzleSubtitleRepository(db),
+  warn: (details, message) => app.log.warn(details, message),
+});
+if (subtitleSweep) {
+  jobs.register({
+    name: "subtitle-sweep",
+    cron: "*/30 * * * *",
+    handler: async () => {
+      const summary = await subtitleSweep();
+      if (summary.downloaded || summary.embedded || summary.failed || summary.unavailable) app.log.info(summary, "subtitle-sweep finished");
+    },
+  });
+}
 
 jobs.register({
   name: "metadata-refresh",
