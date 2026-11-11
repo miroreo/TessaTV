@@ -53,6 +53,12 @@ class FakeRepository implements FileHealthRepository {
     this.saved.push(health);
     this.due = this.due.filter((file) => file.id !== health.mediaFileId);
   }
+  async summary() {
+    return { total: 0, clean: 0, damaged: 0, due: 0 };
+  }
+  async listDamaged() {
+    return [];
+  }
   async listDue(limit: number) {
     return this.due.slice(0, limit);
   }
@@ -73,6 +79,7 @@ describe("FileHealthMonitor", () => {
     const repository = new FakeRepository([...files]);
     const monitor = new FileHealthMonitor({
       repository,
+      isEnabled: async () => true,
       isBusy: () => false,
       check: async (path) => (path.endsWith("2.mkv") ? "bad frame" : null),
       exists: async () => true,
@@ -92,6 +99,7 @@ describe("FileHealthMonitor", () => {
     let busy = true;
     const monitor = new FileHealthMonitor({
       repository,
+      isEnabled: async () => true,
       isBusy: () => busy,
       check: async () => null,
       exists: async () => true,
@@ -106,12 +114,80 @@ describe("FileHealthMonitor", () => {
     await monitor.stop();
   });
 
+  it("does nothing while disabled, and starts once it's turned on", async () => {
+    const repository = new FakeRepository([...files]);
+    let enabled = false;
+    const monitor = new FileHealthMonitor({
+      repository,
+      isEnabled: async () => enabled,
+      isBusy: () => false,
+      check: async () => null,
+      exists: async () => true,
+      disabledMs: 5,
+      idleMs: 5,
+    });
+    monitor.start();
+    await until(() => monitor.status().state === "disabled");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(repository.saved).toHaveLength(0);
+    enabled = true;
+    await until(() => repository.saved.length === 2);
+    await monitor.stop();
+  });
+
+  it("abandons a check in progress when it's turned off, without recording it", async () => {
+    const repository = new FakeRepository([...files]);
+    let enabled = true;
+    let started = false;
+    const monitor = new FileHealthMonitor({
+      repository,
+      isEnabled: async () => enabled,
+      isBusy: () => false,
+      exists: async () => true,
+      check: (_path, signal) =>
+        new Promise((_resolve, reject) => {
+          started = true;
+          signal.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+      enabledPollMs: 5,
+      disabledMs: 5,
+    });
+    monitor.start();
+    await until(() => started);
+    expect(monitor.status()).toMatchObject({ state: "checking", current: { path: "/media/1.mkv" } });
+    enabled = false;
+    await until(() => monitor.status().state === "disabled");
+    expect(monitor.status().current).toBeNull();
+    expect(repository.saved).toHaveLength(0);
+    await monitor.stop();
+  });
+
+  it("reports waiting while a transcode runs, and idle once nothing is due", async () => {
+    const repository = new FakeRepository([]);
+    let busy = true;
+    const monitor = new FileHealthMonitor({
+      repository,
+      isEnabled: async () => true,
+      isBusy: () => busy,
+      check: async () => null,
+      exists: async () => true,
+      busyMs: 5,
+      idleMs: 5,
+    });
+    monitor.start();
+    await until(() => monitor.status().state === "waiting");
+    busy = false;
+    await until(() => monitor.status().state === "idle");
+    await monitor.stop();
+  });
+
   it("skips a file it can't check instead of retrying it, and carries on", async () => {
     const repository = new FakeRepository([...files]);
     const errors: string[] = [];
     let attempts = 0;
     const monitor = new FileHealthMonitor({
       repository,
+      isEnabled: async () => true,
       isBusy: () => false,
       check: async (path) => {
         if (path.endsWith("1.mkv")) {
@@ -138,6 +214,7 @@ describe("FileHealthMonitor", () => {
     let checked = false;
     const monitor = new FileHealthMonitor({
       repository,
+      isEnabled: async () => true,
       isBusy: () => false,
       check: async () => ((checked = true), null),
       exists: async () => false,
@@ -156,6 +233,7 @@ describe("FileHealthMonitor", () => {
     let started = false;
     const monitor = new FileHealthMonitor({
       repository,
+      isEnabled: async () => true,
       isBusy: () => false,
       exists: async () => true,
       check: (_path, signal) =>

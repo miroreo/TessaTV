@@ -580,6 +580,15 @@ expiry. `POST .../start` begins a damaged file at fallback level 2 (CPU-only, er
 so no direct play), and the stats for nerds show the result. Not a guarantee: a file that
 decodes cleanly on the CPU can still upset a GPU decoder, which is why GPU decode is opt-in.
 
+It is a server setting, `fileHealthCheck` (admin Settings page → "File health check", on by
+default). The monitor reads it before every file and every 15s during one, so turning it off
+kills the check in progress at once; results stay stored but stop affecting playback while
+it's off, which is the way out of a false positive. The same card shows progress from
+`GET /api/file-health` (admin-only; refreshed every 10s while the page is open): files
+checked of total, how many are waiting, what's being decoded right now, and the damaged
+files with ffmpeg's first error. `waiting` means paused for a running transcode; `idle`,
+nothing left to check.
+
 **Volume normalization** (on by default, toggle in the player, remembered per browser):
 the `loudness-scan` job (pg-boss, every 15 min, ≤10 min per run so it fits pg-boss's job
 expiry) measures each file's default audio stream with ffmpeg's `ebur128` filter (EBU R128 /

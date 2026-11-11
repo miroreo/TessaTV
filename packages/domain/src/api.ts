@@ -263,6 +263,20 @@ export interface ServerSettingsResponse {
     readonly buttonLabel: string;
   } | null;
   readonly jellyfin: { readonly url: string; readonly hasApiKey: boolean } | null;
+  readonly fileHealthCheck: boolean;
+}
+
+/** `GET /api/file-health` (admins only): the background decode check, for the settings page. */
+export interface FileHealthStatusResponse {
+  readonly enabled: boolean;
+  /** `waiting` while a transcode is running; `idle` when there's nothing left to check. */
+  readonly state: "disabled" | "waiting" | "checking" | "idle";
+  readonly current: { readonly path: string; readonly startedAt: string } | null;
+  readonly total: number;
+  readonly clean: number;
+  readonly damaged: number;
+  readonly due: number;
+  readonly damagedFiles: readonly { readonly path: string; readonly error: string; readonly checkedAt: string }[];
 }
 
 /** `PATCH /api/settings`'s `jellyfin`. Omitting `apiKey` keeps the saved one. */

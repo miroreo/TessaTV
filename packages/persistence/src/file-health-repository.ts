@@ -1,5 +1,5 @@
-import type { FileHealth, FileHealthRepository } from "@tessatv/domain";
-import { asc, desc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
+import type { DamagedFile, FileHealth, FileHealthRepository, FileHealthSummary } from "@tessatv/domain";
+import { asc, count, desc, eq, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { Database } from "./db.js";
 import { fileHealth, mediaFile } from "./schema.js";
 
@@ -17,6 +17,31 @@ export class DrizzleFileHealthRepository implements FileHealthRepository {
       .insert(fileHealth)
       .values(health)
       .onConflictDoUpdate({ target: fileHealth.mediaFileId, set: { checkedAt, sizeBytes, error } });
+  }
+
+  async summary(staleBefore: Date): Promise<FileHealthSummary> {
+    const due = or(isNull(fileHealth.mediaFileId), ne(fileHealth.sizeBytes, mediaFile.sizeBytes), lt(fileHealth.checkedAt, staleBefore));
+    const [row] = await this.db
+      .select({
+        total: count(),
+        clean: count(sql`case when ${fileHealth.mediaFileId} is not null and ${fileHealth.error} is null then 1 end`),
+        damaged: count(sql`case when ${fileHealth.error} is not null then 1 end`),
+        due: count(sql`case when ${due} then 1 end`),
+      })
+      .from(mediaFile)
+      .leftJoin(fileHealth, eq(fileHealth.mediaFileId, mediaFile.id));
+    return row ?? { total: 0, clean: 0, damaged: 0, due: 0 };
+  }
+
+  async listDamaged(limit: number): Promise<DamagedFile[]> {
+    const rows = await this.db
+      .select({ mediaFileId: fileHealth.mediaFileId, path: mediaFile.path, error: fileHealth.error, checkedAt: fileHealth.checkedAt })
+      .from(fileHealth)
+      .innerJoin(mediaFile, eq(mediaFile.id, fileHealth.mediaFileId))
+      .where(isNotNull(fileHealth.error))
+      .orderBy(desc(fileHealth.checkedAt))
+      .limit(limit);
+    return rows.map((row) => ({ ...row, error: row.error ?? "" }));
   }
 
   async listDue(limit: number, staleBefore: Date): Promise<{ id: string; path: string; sizeBytes: number }[]> {

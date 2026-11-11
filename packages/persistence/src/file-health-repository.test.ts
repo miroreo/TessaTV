@@ -67,4 +67,37 @@ describe("DrizzleFileHealthRepository", () => {
     expect(due.map((file) => file.id).filter((id) => ours.includes(id))).toEqual([freshNew, freshOld, changed, stale]);
     expect(due.find((file) => file.id === changed)?.sizeBytes).toBe(50);
   });
+
+  it("counts clean, damaged and due files, and lists the damaged ones newest check first", async () => {
+    const future = Date.now() + 200 * 24 * 3600 * 1000;
+    const staleBefore = new Date(future);
+    const [clean, damagedOlder, damagedNewer, unchecked] = [
+      await mediaFile(new Date(future)),
+      await mediaFile(new Date(future)),
+      await mediaFile(new Date(future)),
+      await mediaFile(new Date(future)),
+    ];
+    const fresh = new Date(future + 10);
+    await health.save({ mediaFileId: clean, checkedAt: fresh, sizeBytes: 1, error: null });
+    await health.save({ mediaFileId: damagedOlder, checkedAt: new Date(future + 20), sizeBytes: 1, error: "bad frame" });
+    await health.save({ mediaFileId: damagedNewer, checkedAt: new Date(future + 30), sizeBytes: 1, error: "bad packet" });
+
+    // Other test files add and remove files in the same table at the same time, so only
+    // lower bounds hold: our four files, three checked (one clean, two damaged), one due.
+    const summary = await health.summary(staleBefore);
+    expect(summary.total).toBeGreaterThanOrEqual(4);
+    expect(summary.clean).toBeGreaterThanOrEqual(1);
+    expect(summary.damaged).toBeGreaterThanOrEqual(2);
+    expect(summary.due).toBeGreaterThanOrEqual(1);
+    expect(summary.clean + summary.damaged).toBeLessThanOrEqual(summary.total);
+    expect(unchecked).toBeDefined();
+
+    const ours: string[] = [damagedOlder, damagedNewer];
+    const damaged = (await health.listDamaged(100_000)).filter((file) => ours.includes(file.mediaFileId));
+    expect(damaged.map((file) => [file.mediaFileId, file.error])).toEqual([
+      [damagedNewer, "bad packet"],
+      [damagedOlder, "bad frame"],
+    ]);
+    expect(damaged[0]?.path).toBe(`/media/${damagedNewer}.mkv`);
+  });
 });

@@ -93,6 +93,7 @@ const app = buildApp({
     availability,
   },
   libraryFolders: { folders: libraryFolders, scanner },
+  fileHealth: { repository: fileHealthRepository, status: () => fileHealth.status() },
   settings: serverSettings,
   users,
   sso: {
@@ -153,6 +154,7 @@ jobs.register({
 // film outlasts a job's expiry.
 const fileHealth = new FileHealthMonitor({
   repository: fileHealthRepository,
+  isEnabled: async () => (await serverSettings.get()).fileHealthCheck,
   isBusy: () => transcodes.runningCount > 0,
   onChecked: (path, error) =>
     error ? app.log.warn({ path, error }, "file failed its decode check") : app.log.debug({ path }, "file passed its decode check"),

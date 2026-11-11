@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     MAX_STREAM_HEIGHTS,
+    type FileHealthStatusResponse,
     type JellyfinImportResponse,
     type LibraryFolderSummary,
     type LibraryScanStatus,
@@ -64,6 +65,43 @@
       if (liveScan.running) watchScan();
       else await invalidateAll();
     }, 1500);
+  }
+
+  /** The background decode check: refreshed here every few seconds while the page is open. */
+  let liveHealth = $state<FileHealthStatusResponse | null>(null);
+  const health = $derived(liveHealth ?? data.fileHealth);
+  let savingHealth = $state(false);
+  let healthError = $state<string | null>(null);
+  $effect(() => {
+    const timer = setInterval(async () => {
+      try {
+        liveHealth = await api<FileHealthStatusResponse>(fetch, "/api/file-health");
+      } catch {
+        // A missed refresh just shows the previous numbers.
+      }
+    }, 10_000);
+    return () => clearInterval(timer);
+  });
+
+  const HEALTH_STATE_LABEL: Record<FileHealthStatusResponse["state"], string> = {
+    disabled: "Off",
+    waiting: "Paused while a video is transcoding",
+    checking: "Checking",
+    idle: "Everything is checked",
+  };
+
+  async function setFileHealthCheck(event: Event) {
+    const enabled = (event.currentTarget as HTMLInputElement).checked;
+    savingHealth = true;
+    healthError = null;
+    try {
+      await api<ServerSettingsResponse>(fetch, "/api/settings", { method: "PATCH", body: JSON.stringify({ fileHealthCheck: enabled }) });
+      liveHealth = await api<FileHealthStatusResponse>(fetch, "/api/file-health");
+    } catch (cause) {
+      healthError = (cause as Error).message;
+    } finally {
+      savingHealth = false;
+    }
   }
 
   let maxStreamHeight = $state<MaxStreamHeight | null>(null);
@@ -222,6 +260,53 @@
       starts.
     </p>
     {#if settingsError}<div class="alert alert-error">{settingsError}</div>{/if}
+  </div>
+</section>
+
+<section class="card bg-base-200 mb-6">
+  <div class="card-body">
+    <h2 class="card-title">File health check</h2>
+    <p class="text-sm opacity-70">
+      Slowly decodes every video file in the background, on the CPU at the lowest priority and only while nothing is transcoding,
+      to find damaged files before anyone plays them. A damaged file is always transcoded on the CPU, never played directly.
+      Each file is checked again every 90 days, or when it changes.
+    </p>
+    <label class="label cursor-pointer justify-start gap-3">
+      <input type="checkbox" class="toggle toggle-warning" checked={health.enabled} onchange={setFileHealthCheck} disabled={savingHealth} />
+      <span class="text-base-content">Check files in the background</span>
+      {#if savingHealth}<span class="loading loading-spinner loading-sm"></span>{/if}
+    </label>
+    {#if healthError}<div class="alert alert-error">{healthError}</div>{/if}
+    <div class="stats stats-vertical sm:stats-horizontal bg-base-100 w-full">
+      <div class="stat">
+        <div class="stat-title">Checked</div>
+        <div class="stat-value text-2xl">{health.clean + health.damaged} <span class="text-base font-normal opacity-70">of {health.total}</span></div>
+        <div class="stat-desc">{health.due} waiting</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Damaged</div>
+        <div class="stat-value text-2xl" class:text-error={health.damaged > 0}>{health.damaged}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Status</div>
+        <div class="stat-value text-lg">{HEALTH_STATE_LABEL[health.state]}</div>
+        {#if health.current}
+          <div class="stat-desc break-all">{health.current.path}</div>
+        {/if}
+      </div>
+    </div>
+    {#if health.damagedFiles.length > 0}
+      <h3 class="mt-2 font-semibold">Damaged files</h3>
+      <ul class="divide-base-300 divide-y text-sm">
+        {#each health.damagedFiles as file (file.path)}
+          <li class="py-2">
+            <div class="font-mono break-all">{file.path}</div>
+            <div class="text-error break-words opacity-90">{file.error}</div>
+            <div class="text-xs opacity-60">checked {new Date(file.checkedAt).toLocaleString()}</div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </div>
 </section>
 

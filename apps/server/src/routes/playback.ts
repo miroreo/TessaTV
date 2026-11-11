@@ -309,9 +309,11 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       if (!playable) return reply.code(404).send({ error: "not_found" });
       const media = await probeOr404(playable.file, reply);
       if (!media) return reply;
-      const maxHeight = (await deps.settings?.get())?.maxStreamHeight ?? undefined;
-      // A file the background check found damaged starts on the CPU-only, error-tolerant level.
-      const damaged = (await deps.fileHealthRepository?.get(playable.file.id))?.error != null;
+      const settings = await deps.settings?.get();
+      const maxHeight = settings?.maxStreamHeight ?? undefined;
+      // A file the background check found damaged starts on the CPU-only, error-tolerant level —
+      // unless an admin turned the check off, which also sets its findings aside.
+      const damaged = settings?.fileHealthCheck !== false && (await deps.fileHealthRepository?.get(playable.file.id))?.error != null;
       const startLevel = Math.max(request.body.fallbackLevel ?? 0, damaged ? DAMAGED_FILE_FALLBACK_LEVEL : 0) as FallbackLevel;
       try {
         return await startStream(

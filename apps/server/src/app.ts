@@ -26,6 +26,7 @@ import { registerLibraryRoutes } from "./routes/library.js";
 import { registerPlaybackRoutes, type PlaybackDependencies } from "./routes/playback.js";
 import { type JellyfinImportDependencies, registerJellyfinImportRoutes } from "./routes/jellyfin-import.js";
 import { registerOidcRoutes } from "./routes/oidc.js";
+import { registerFileHealthRoutes, type FileHealthDependencies } from "./routes/file-health.js";
 import { registerServerSettingsRoutes } from "./routes/server-settings.js";
 import { oidcClientConfig, type SsoDependencies } from "./sso.js";
 import { type NodeRequestHandler, registerWebUiRoutes } from "./routes/web-ui.js";
@@ -63,6 +64,8 @@ export interface AppDependencies {
   jellyfinImport?: JellyfinImportDependencies;
   /** Library folder settings and scanning; admin-only routes, mounted together with `auth`. */
   libraryFolders?: LibraryFolderDependencies;
+  /** The background decode check's status page; admin-only, mounted with `auth` and `settings`. */
+  fileHealth?: Omit<FileHealthDependencies, "settings">;
   /** SvelteKit's built handler, served at the root for any path no explicit route claims. Omitted when the web app isn't built. */
   webUiHandler?: NodeRequestHandler;
 }
@@ -120,6 +123,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
       ...(deps.jellyfinImport ? { jellyfin: { apiKeys: deps.jellyfinImport.apiKeys, sourceFor: deps.jellyfinImport.sourceFor } } : {}),
     });
     if (deps.jellyfinImport) registerJellyfinImportRoutes(app, deps.jellyfinImport);
+    if (deps.fileHealth) registerFileHealthRoutes(app, { ...deps.fileHealth, settings: deps.settings });
   }
 
   if (deps.jellyfin) registerJellyfinCompat(app, deps.jellyfin);

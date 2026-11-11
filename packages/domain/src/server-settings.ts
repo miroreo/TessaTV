@@ -42,6 +42,11 @@ export interface ServerSettings {
   readonly oidc: OidcSettings | null;
   /** Null until an admin points TessaTV at a Jellyfin server. */
   readonly jellyfin: JellyfinImportSettings | null;
+  /**
+   * Decode every file in the background to find damaged ones (see `FileHealth`). Turning it
+   * off also stops damaged results from changing how files play.
+   */
+  readonly fileHealthCheck: boolean;
 }
 
-export const DEFAULT_SERVER_SETTINGS: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null };
+export const DEFAULT_SERVER_SETTINGS: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true };
