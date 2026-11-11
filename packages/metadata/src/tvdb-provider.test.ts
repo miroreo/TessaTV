@@ -117,6 +117,47 @@ describe("TvdbMetadataProvider", () => {
     await expect(provider.fetchDetails("999999", "movie")).resolves.toBeNull();
   });
 
+  it("fetchEpisodes follows every page and skips unnamed or unnumbered episodes", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(fakeResponse(envelope({ token: "jwt" })))
+      .mockResolvedValueOnce(
+        fakeResponse({
+          status: "success",
+          data: { episodes: [{ name: "Pilot", seasonNumber: 1, number: 1 }, { name: "", seasonNumber: 1, number: 2 }] },
+          links: { next: 1 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        fakeResponse({
+          status: "success",
+          data: { episodes: [{ name: " Dead Drop ", seasonNumber: 1, number: 4 }, { name: "Orphan" }] },
+          links: { next: null },
+        }),
+      );
+    const provider = new TvdbMetadataProvider(new TvdbClient({ apiKey: "key", fetchImpl }));
+
+    const episodes = await provider.fetchEpisodes("247808");
+
+    expect(episodes).toEqual([
+      { season: 1, episode: 1, title: "Pilot" },
+      { season: 1, episode: 4, title: "Dead Drop" },
+    ]);
+    expect(requestedUrl(fetchImpl, 1).pathname).toBe("/v4/series/247808/episodes/default/eng");
+    expect(requestedUrl(fetchImpl, 1).searchParams.get("page")).toBe("0");
+    expect(requestedUrl(fetchImpl, 2).searchParams.get("page")).toBe("1");
+  });
+
+  it("fetchEpisodes returns an empty list for an unknown series (404)", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(fakeResponse(envelope({ token: "jwt" })))
+      .mockResolvedValueOnce(fakeResponse({ status: "failure" }, 404));
+    const provider = new TvdbMetadataProvider(new TvdbClient({ apiKey: "key", fetchImpl }));
+
+    expect(await provider.fetchEpisodes("0")).toEqual([]);
+  });
+
   it("re-logs in exactly once when a request comes back 401, then retries", async () => {
     const fetchImpl = vi
       .fn()

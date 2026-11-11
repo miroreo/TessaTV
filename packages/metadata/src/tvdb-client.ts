@@ -12,6 +12,8 @@ export interface TvdbClientOptions {
 interface TvdbEnvelope<T> {
   readonly status: string;
   readonly data: T;
+  /** Present on paged endpoints; `next` is the next 0-based page number, or null on the last. */
+  readonly links?: { readonly next?: number | null };
 }
 
 /**
@@ -60,6 +62,18 @@ export class TvdbClient {
   async get<T>(path: string, params: QueryParams = {}): Promise<T> {
     const body = await this.http.get(path, { searchParams: params }).json<TvdbEnvelope<T>>();
     return body.data;
+  }
+
+  /** Follows a paged endpoint (`?page=0,1,…` until `links.next` is null) and concatenates
+   * the items `pick` extracts from each page's data. */
+  async getAllPages<D, T>(path: string, pick: (data: D) => readonly T[], params: QueryParams = {}): Promise<T[]> {
+    const items: T[] = [];
+    for (let page: number | null = 0; page !== null; ) {
+      const body: TvdbEnvelope<D> = await this.http.get(path, { searchParams: { ...params, page: String(page) } }).json();
+      items.push(...pick(body.data));
+      page = body.links?.next ?? null;
+    }
+    return items;
   }
 
   /** Like `get`, but a 404 (unknown id) returns null instead of throwing. */
