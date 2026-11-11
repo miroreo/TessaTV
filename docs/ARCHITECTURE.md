@@ -692,6 +692,12 @@ with a 10-minute TTL like Jellyfin's); a session token is created only when the 
 approved secret, once. The `AccessToken` is a normal TessaTV session token, so it works for
 `/api` too. Response types come from `@jellyfin/sdk`.
 
+The TessaTV web UI on a TV works the same way without any Jellyfin client: the login page's
+"Sign in with a code" button calls `POST /api/auth/pairing` (public), shows the code, and polls
+`POST /api/auth/pairing/poll`; approval sets the session cookie. The TV never visits the SSO
+provider — only the approving device does, and only if it isn't signed in yet (the login page's
+`?next=` carries it back to `/link?code=…` after SSO; `next` is same-site paths only).
+
 **Not yet:** views, items, images, playback info, user data/watch state, sessions/websocket.
 
 

@@ -36,6 +36,20 @@ export interface LoginResponse {
   readonly token: string;
 }
 
+/** `POST /api/auth/pairing`: a signed-out browser (a TV) asks for a code to be approved elsewhere. */
+export interface PairingResponse {
+  /** Shown on screen; typed into "Sign in a TV" on a signed-in device. */
+  readonly code: string;
+  /** Held by the browser and sent back to poll; never shown. */
+  readonly secret: string;
+  readonly expiresInSeconds: number;
+}
+
+/** `POST /api/auth/pairing/poll`; `approved` also sets the session cookie. */
+export interface PairingPollResponse {
+  readonly status: "pending" | "approved";
+}
+
 /** Every `/api` error body. */
 export interface ApiErrorResponse {
   readonly error: string;

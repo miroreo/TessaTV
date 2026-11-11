@@ -2,6 +2,7 @@
   import { goto, invalidateAll } from "$app/navigation";
   import { page } from "$app/state";
   import CredentialsForm from "$lib/CredentialsForm.svelte";
+  import PairingCode from "$lib/PairingCode.svelte";
   import { submitCredentials } from "$lib/session.js";
   import type { PageData } from "./$types.js";
 
@@ -16,6 +17,11 @@
     return value && /^\/(?![/\\])/.test(value) ? value : null;
   });
   const ssoHref = $derived(next ? `/api/auth/oidc/login?next=${encodeURIComponent(next)}` : "/api/auth/oidc/login");
+
+  async function signedInElsewhere() {
+    await invalidateAll();
+    await goto(next ?? "/");
+  }
 
   async function login(username: string, password: string) {
     const error = await submitCredentials("/api/auth/login", username, password);
@@ -43,5 +49,7 @@
     {:else}
       <CredentialsForm submitLabel="Sign in" onsubmit={login} />
     {/if}
+    <div class="divider my-0">or</div>
+    <PairingCode onapproved={signedInElsewhere} />
   </div>
 </div>
