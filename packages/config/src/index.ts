@@ -13,6 +13,8 @@ const envSchema = z.object({
   // `auto` falls back to software; an explicit `vaapi` that doesn't work fails startup.
   HARDWARE_ACCEL: z.enum(["auto", "none", "vaapi"]).default("auto"),
   VAAPI_DEVICE: z.string().min(1).optional(),
+  // Off by default: a corrupt file can hang the GPU's decoder and freeze the whole machine.
+  VAAPI_HARDWARE_DECODE: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   TRANSCODE_DIR: z.string().min(1).default(join(tmpdir(), "tessatv-transcodes")),
   MAX_CONCURRENT_TRANSCODES: z.coerce.number().int().positive().default(3),
 });

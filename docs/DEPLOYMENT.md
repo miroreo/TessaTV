@@ -37,6 +37,7 @@ Environment (validated at startup by `packages/config`; a bad value stops the se
 | `TMDB_API_KEY`, `TVDB_API_KEY` | no | Metadata for movies / shows is disabled until set. |
 | `HARDWARE_ACCEL` | no | `auto` (default: VAAPI if it works, else software), `none`, `vaapi` (fails startup if VAAPI doesn't work). |
 | `VAAPI_DEVICE` | no | Defaults to `/dev/dri/renderD128`. |
+| `VAAPI_HARDWARE_DECODE` | no | `false` (default): the CPU decodes and the GPU only encodes, because corrupt input can hang a GPU decoder and freeze the machine. `true` decodes on the GPU too (faster for 4K). |
 | `MAX_CONCURRENT_TRANSCODES` | no | Default 3. |
 
 Media is mounted **read-only at the same path as on the host**, so the folder paths you

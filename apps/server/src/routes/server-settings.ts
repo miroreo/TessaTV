@@ -67,6 +67,8 @@ function publicView(settings: ServerSettings): ServerSettingsResponse {
         }
       : null,
     jellyfin: settings.jellyfin ? { url: settings.jellyfin.url, hasApiKey: settings.jellyfin.apiKeySealed !== "" } : null,
+    fileHealthCheck: settings.fileHealthCheck,
+    fileHealthFullSpeed: settings.fileHealthFullSpeed,
   };
 }
 
@@ -82,12 +84,18 @@ export function registerServerSettingsRoutes(server: FastifyInstance, deps: Serv
     "/api/settings",
     {
       ...admin,
-      schema: { body: z.object({ maxStreamHeight: maxStreamHeight.optional(), oidc: oidcInput.optional(), jellyfin: jellyfinInput.optional() }).strict() },
+      schema: {
+        body: z
+          .object({ maxStreamHeight: maxStreamHeight.optional(), oidc: oidcInput.optional(), jellyfin: jellyfinInput.optional(), fileHealthCheck: z.boolean().optional(), fileHealthFullSpeed: z.boolean().optional() })
+          .strict(),
+      },
     },
     async (request, reply) => {
-      const { maxStreamHeight: height, oidc: input, jellyfin: jellyfinChange } = request.body;
+      const { maxStreamHeight: height, oidc: input, jellyfin: jellyfinChange, fileHealthCheck, fileHealthFullSpeed } = request.body;
       const changes: { -readonly [K in keyof ServerSettings]?: ServerSettings[K] } = {};
       if (height !== undefined) changes.maxStreamHeight = height;
+      if (fileHealthCheck !== undefined) changes.fileHealthCheck = fileHealthCheck;
+      if (fileHealthFullSpeed !== undefined) changes.fileHealthFullSpeed = fileHealthFullSpeed;
       if (input) {
         if (!deps.sso) return reply.code(503).send({ error: "sso_unavailable", message: "Single sign-on isn't available on this server" });
         const saved = (await settings.get()).oidc;

@@ -5,6 +5,8 @@ import { AuthService } from "@tessatv/auth";
 import type {
   AuthSession,
   AuthSessionRepository,
+  FileHealth,
+  FileHealthRepository,
   LibraryNode,
   LibraryRepository,
   MediaFile,
@@ -117,13 +119,31 @@ class InMemoryProgress implements WatchProgressRepository {
 }
 
 class InMemorySettings implements ServerSettingsRepository {
-  settings: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null };
+  settings: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false };
   async get() {
     return this.settings;
   }
   async update(changes: Partial<ServerSettings>) {
     this.settings = { ...this.settings, ...changes };
     return this.settings;
+  }
+}
+
+/** Reports the files in `damaged` as the background decode check would have found them. */
+class FakeFileHealth implements FileHealthRepository {
+  readonly damaged = new Set<string>();
+  async get(mediaFileId: string): Promise<FileHealth | null> {
+    return this.damaged.has(mediaFileId) ? { mediaFileId, checkedAt: new Date(5000), sizeBytes: 26, error: "error while decoding MB 3 13" } : null;
+  }
+  async save() {}
+  async summary() {
+    return { total: 3, clean: 1, damaged: 1, due: 1 };
+  }
+  async listDamaged() {
+    return [{ mediaFileId: "file-film", path: "/media/film.mp4", error: "error while decoding MB 3 13", checkedAt: new Date(5000) }];
+  }
+  async listDue() {
+    return [];
   }
 }
 
@@ -190,6 +210,7 @@ describe("browse, playback and progress routes", () => {
   let headers: { authorization: string };
   const progress = new InMemoryProgress();
   const settings = new InMemorySettings();
+  const fileHealth = new FakeFileHealth();
   const transcodeDir = () => join(root, "hls");
 
   beforeAll(async () => {
@@ -229,6 +250,7 @@ describe("browse, playback and progress routes", () => {
     headers = { authorization: `Bearer ${token}` };
     app = buildApp({
       settings,
+      fileHealth: { repository: fileHealth, status: () => ({ state: "checking", fullSpeed: false, current: { path: "/media/e1.mkv", startedAt: new Date(7000), durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 } }) },
       libraryRepository: library,
       metadataProviders: {},
       auth,
@@ -236,6 +258,7 @@ describe("browse, playback and progress routes", () => {
         progressRepository: progress,
         metadataCache: null,
         transcodes,
+        fileHealthRepository: fileHealth,
         probe: async (path) => probeOf(path, path.endsWith(".mp4") ? "mp4" : "mkv"),
         extractSubtitles: async () => "WEBVTT\n\n00:01:40.000 --> 00:01:45.000\nHi\n",
       },
@@ -321,7 +344,7 @@ describe("browse, playback and progress routes", () => {
 
   it("caps every stream at the admin's maximum resolution, transcoding a file that would direct play", async () => {
     const patched = await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: 480 } });
-    expect(patched.json()).toEqual({ maxStreamHeight: 480, oidc: null, jellyfin: null });
+    expect(patched.json()).toEqual({ maxStreamHeight: 480, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false });
     try {
       const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
       expect(started.json()).toMatchObject({ mode: "transcode", reasons: ["VideoResolutionNotSupported"] });
@@ -332,10 +355,48 @@ describe("browse, playback and progress routes", () => {
     } finally {
       await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: null } });
     }
-    expect((await app.inject({ method: "GET", url: "/api/settings", headers })).json()).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null });
+    expect((await app.inject({ method: "GET", url: "/api/settings", headers })).json()).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false });
     expect((await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: 999 } })).statusCode).toBe(400);
     const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
     expect(started.json()).toMatchObject({ mode: "direct-play" });
+  });
+
+  it("starts a file the decode check found damaged on the CPU-only level, until the check is turned off", async () => {
+    const start = () => app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
+    fileHealth.damaged.add("file-film");
+    try {
+      expect((await start()).json()).toMatchObject({ mode: "transcode", fallbackLevel: 2 });
+      expect((await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthCheck: false } })).json()).toMatchObject({ fileHealthCheck: false });
+      expect((await start()).json()).toMatchObject({ mode: "direct-play" });
+    } finally {
+      fileHealth.damaged.clear();
+      await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthCheck: true } });
+    }
+  });
+
+  it("shows the decode check's progress and findings to admins", async () => {
+    const status = (await app.inject({ method: "GET", url: "/api/file-health", headers })).json();
+    expect(status).toEqual({
+      enabled: true,
+      fullSpeed: false,
+      state: "checking",
+      current: { path: "/media/e1.mkv", startedAt: new Date(7000).toISOString(), durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 },
+      total: 3, clean: 1, damaged: 1, due: 1,
+      damagedFiles: [{ path: "/media/film.mp4", error: "error while decoding MB 3 13", checkedAt: new Date(5000).toISOString() }],
+    });
+    await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthCheck: false } });
+    try {
+      expect((await app.inject({ method: "GET", url: "/api/file-health", headers })).json()).toMatchObject({ enabled: false, state: "disabled", current: null });
+    } finally {
+      await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthCheck: true } });
+    }
+    await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthFullSpeed: true } });
+    try {
+      expect((await app.inject({ method: "GET", url: "/api/file-health", headers })).json()).toMatchObject({ fullSpeed: true });
+    } finally {
+      await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthFullSpeed: false } });
+    }
+    expect((await app.inject({ method: "GET", url: "/api/file-health" })).statusCode).toBe(401);
   });
 
   it("marks episodes watched and unwatched by hand, and forgets a saved position", async () => {

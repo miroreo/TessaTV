@@ -12,13 +12,14 @@ import {
   DrizzleMetadataCacheRepository,
   DrizzleUserRepository,
   DrizzleLibraryFolderRepository,
+  DrizzleFileHealthRepository,
   DrizzleLoudnessRepository,
   DrizzleMediaAvailabilityRepository,
   DrizzleServerSettingsRepository,
   DrizzleWatchProgressRepository,
   runMigrations,
 } from "@tessatv/persistence";
-import { measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
+import { FileHealthMonitor, measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
 import { LibraryScanner } from "./library-scanner.js";
 import { loadWebUiHandler } from "./routes/web-ui.js";
@@ -32,6 +33,7 @@ await runMigrations(db);
 const libraryRepository = new DrizzleLibraryRepository(db);
 const metadataCacheRepository = new DrizzleMetadataCacheRepository(db);
 const loudnessRepository = new DrizzleLoudnessRepository(db);
+const fileHealthRepository = new DrizzleFileHealthRepository(db);
 const users = new DrizzleUserRepository(db);
 const auth = new AuthService(users, new DrizzleAuthSessionRepository(db));
 const serverSettings = new DrizzleServerSettingsRepository(db);
@@ -55,6 +57,7 @@ const metadataProviders: MetadataProvidersByKind = {
 // Resolved up front so a misconfigured explicit `vaapi` stops startup, not the first playback.
 const hardwareAccel = await selectHardwareAccel(config.HARDWARE_ACCEL, {
   ...(config.VAAPI_DEVICE ? { vaapiDevice: config.VAAPI_DEVICE } : {}),
+  vaapiHardwareDecode: config.VAAPI_HARDWARE_DECODE,
 });
 const transcodes = new TranscodeManager({
   directory: config.TRANSCODE_DIR,
@@ -86,9 +89,11 @@ const app = buildApp({
     metadataCache: metadataCacheRepository,
     transcodes,
     loudnessRepository,
+    fileHealthRepository,
     availability,
   },
   libraryFolders: { folders: libraryFolders, scanner },
+  fileHealth: { repository: fileHealthRepository, status: () => fileHealth.status() },
   settings: serverSettings,
   users,
   sso: {
@@ -144,6 +149,19 @@ jobs.register({
   },
 });
 
+// Decodes every file end to end on the CPU, slowly and only while no transcode is running, so
+// a damaged file is known before anyone plays it. Not a scheduled job: one check of a long
+// film outlasts a job's expiry.
+const fileHealth = new FileHealthMonitor({
+  repository: fileHealthRepository,
+  isEnabled: async () => (await serverSettings.get()).fileHealthCheck,
+  isFullSpeed: async () => (await serverSettings.get()).fileHealthFullSpeed,
+  isBusy: () => transcodes.runningCount > 0,
+  onChecked: (path, error) =>
+    error ? app.log.warn({ path, error }, "file failed its decode check") : app.log.debug({ path }, "file passed its decode check"),
+  onError: (path, error) => app.log.warn({ path, error: error.message }, "couldn't run the decode check"),
+});
+
 jobs.register({
   name: "metadata-refresh",
   cron: METADATA_REFRESH_CRON,
@@ -169,6 +187,7 @@ app
     app.log.info(`Transcoding with hardware accel: ${hardwareAccel.kind}`);
     await transcodes.start();
     await jobs.start();
+    fileHealth.start();
   })
   .catch((error: unknown) => {
     app.log.error(error);
@@ -178,6 +197,6 @@ app
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     // Leaves no ffmpeg behind writing into a directory nothing will clean up until next boot.
-    void Promise.allSettled([transcodes.shutdown(), jobs.stop()]).finally(() => process.exit(0));
+    void Promise.allSettled([transcodes.shutdown(), jobs.stop(), fileHealth.stop()]).finally(() => process.exit(0));
   });
 }

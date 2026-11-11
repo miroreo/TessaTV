@@ -197,9 +197,12 @@ export class TranscodeManager {
   }
 
   /** Finished transcodes just hold files, so only live ffmpeg processes count. */
+  get runningCount(): number {
+    return [...this.entries.values()].filter((entry) => entry.session.state === "running").length;
+  }
+
   private assertCapacity(): void {
-    const running = [...this.entries.values()].filter((entry) => entry.session.state === "running").length;
-    if (running >= this.maxConcurrent) throw new TranscodeCapacityError(this.maxConcurrent);
+    if (this.runningCount >= this.maxConcurrent) throw new TranscodeCapacityError(this.maxConcurrent);
   }
 
   private get fallback(): HardwareAccel | null {

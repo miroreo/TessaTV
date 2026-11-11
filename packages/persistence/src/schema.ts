@@ -200,6 +200,16 @@ export const audioLoudness = pgTable("audio_loudness", {
   error: text("error"),
 });
 
+/** One end-to-end decode check per media file — see `FileHealth`. */
+export const fileHealth = pgTable("file_health", {
+  mediaFileId: uuid("media_file_id")
+    .primaryKey()
+    .references(() => mediaFile.id, { onDelete: "cascade" }),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  error: text("error"),
+});
+
 /** Folders the scheduled library scan imports from — see `LibraryFolder`. */
 export const libraryFolder = pgTable(
   "library_folder",

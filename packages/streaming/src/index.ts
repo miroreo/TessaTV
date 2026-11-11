@@ -5,6 +5,7 @@ export * from "./hardware-accel/hardware-accel.js";
 export * from "./hardware-accel/software.js";
 export * from "./hardware-accel/vaapi.js";
 export * from "./loudness.js";
+export * from "./file-health.js";
 export * from "./media-probe.js";
 export * from "./playback-plan.js";
 export * from "./process.js";
