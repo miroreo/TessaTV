@@ -1,10 +1,12 @@
 import type {
   MetadataDetails,
+  MetadataEpisode,
   MetadataMediaKind,
   MetadataProvider,
   MetadataSearchCandidate,
   MetadataSearchQuery,
 } from "./metadata-provider.js";
+import { nullOn404 } from "./http.js";
 import { TvdbClient } from "./tvdb-client.js";
 
 interface TvdbSearchResult {
@@ -35,6 +37,12 @@ interface TvdbSeriesExtended {
   readonly overview?: string;
   readonly image?: string;
   readonly artworks?: readonly TvdbArtwork[];
+}
+
+interface TvdbEpisode {
+  readonly name?: string | null;
+  readonly seasonNumber?: number | null;
+  readonly number?: number | null;
 }
 
 interface TvdbTranslation {
@@ -74,6 +82,22 @@ export class TvdbMetadataProvider implements MetadataProvider {
       overview: result.overview ?? null,
       posterUrl: result.image_url ?? null,
     }));
+  }
+
+  /** Aired-order episode names, in English: `/series/{id}/episodes/default/eng` is paged, and
+   * episodes TheTVDB hasn't named (or numbered) are left out rather than given a blank title. */
+  async fetchEpisodes(externalId: string): Promise<MetadataEpisode[]> {
+    const episodes = await nullOn404(
+      this.client.getAllPages<{ episodes: TvdbEpisode[] }, TvdbEpisode>(
+        `/series/${externalId}/episodes/default/eng`,
+        (data) => data.episodes,
+      ),
+    );
+    return (episodes ?? []).flatMap((episode) => {
+      const title = episode.name?.trim();
+      if (!title || episode.seasonNumber == null || episode.number == null) return [];
+      return [{ season: episode.seasonNumber, episode: episode.number, title }];
+    });
   }
 
   async fetchDetails(externalId: string, mediaKind: MetadataMediaKind): Promise<MetadataDetails | null> {

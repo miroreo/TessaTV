@@ -1,5 +1,11 @@
 import type { LibraryRepository, MediaTypeId } from "@tessatv/domain";
-import { autoIdentifyLibrary, type MetadataProvidersByKind, normalizeSeriesTitle, parseTitleAndYear } from "@tessatv/library";
+import {
+  autoIdentifyLibrary,
+  type MetadataProvidersByKind,
+  normalizeSeriesTitle,
+  parseTitleAndYear,
+  syncSeriesEpisodeTitles,
+} from "@tessatv/library";
 import { type MetadataMediaKind, type MetadataProvider, toMetadataMediaKind } from "@tessatv/metadata";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -121,6 +127,14 @@ export function registerLibraryMetadataRoutes(
         externalIds,
         updatedAt: new Date(),
       });
+
+      // A series' episodes take the new match's names now, not at the next import. Best effort:
+      // the identify itself has already succeeded, and the scheduled sync retries.
+      if (mediaKind === "series") {
+        await syncSeriesEpisodeTitles(libraryRepository, provider, { ...node, externalIds }).catch((error: unknown) =>
+          request.log.warn({ err: error }, "episode title sync after identify failed"),
+        );
+      }
 
       return { node: { ...node, title: details.title, externalIds }, details };
     },

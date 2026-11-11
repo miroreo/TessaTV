@@ -7,6 +7,7 @@ export * from "./importer.js";
 export * from "./metadata-sweep.js";
 export * from "./auto-identify.js";
 export * from "./refresh-metadata.js";
+export * from "./sync-episode-titles.js";
 export * from "./merge-duplicate-series.js";
 export * from "./watch-history.js";
 export * from "./library-scan.js";

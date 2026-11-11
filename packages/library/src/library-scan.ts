@@ -6,12 +6,14 @@ import { mergeDuplicateSeries, type MergeDuplicateSeriesSummary } from "./merge-
 import type { MetadataProvidersByKind } from "./metadata-sweep.js";
 import { scanMoviesDirectory } from "./scan-movies.js";
 import { scanShowsDirectory } from "./scan-shows.js";
+import { type EpisodeTitleSyncSummary, syncEpisodeTitles } from "./sync-episode-titles.js";
 
 export interface ImportFoldersResult {
   movies?: { created: number; skipped: number; relinked: number; skippedFolders: { path: string; reason: string }[] };
   shows?: { created: number; skipped: number; relinked: number; seriesFound: number };
   identify?: AutoIdentifySummary;
   duplicateSeries?: MergeDuplicateSeriesSummary;
+  episodeTitles?: EpisodeTitleSyncSummary;
 }
 
 /**
@@ -56,6 +58,9 @@ export async function importFolders(
   // reported for `POST /api/library/merge-duplicates/confirm`.
   if (providers.series) {
     result.duplicateSeries = await mergeDuplicateSeries(repository, providers.series);
+    // After the merge, so a merged-in season's episodes are named too. Episode titles from the
+    // filename never get corrected by a rescan on their own (see `syncSeriesEpisodeTitles`).
+    result.episodeTitles = await syncEpisodeTitles(repository, providers);
   }
   return result;
 }

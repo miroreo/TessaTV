@@ -29,6 +29,13 @@ export interface MetadataDetails {
   readonly backdropUrl: string | null;
 }
 
+/** One episode of a series, as the provider numbers it (aired order). */
+export interface MetadataEpisode {
+  readonly season: number;
+  readonly episode: number;
+  readonly title: string;
+}
+
 /**
  * Identification only — TMDB today, TheTVDB or others later as drop-in adapters. Search
  * results are deliberately a list of candidates, not an auto-picked single answer: the
@@ -38,4 +45,7 @@ export interface MetadataProvider {
   readonly id: string;
   search(query: MetadataSearchQuery): Promise<MetadataSearchCandidate[]>;
   fetchDetails(externalId: string, mediaKind: MetadataMediaKind): Promise<MetadataDetails | null>;
+  /** Every episode's name for a series, where the provider has them (TheTVDB does; episode
+   * titles are why it's the TV default). Absent on providers that can't list them. */
+  fetchEpisodes?(externalId: string): Promise<MetadataEpisode[]>;
 }

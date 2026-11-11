@@ -1,6 +1,7 @@
 import type { MetadataCacheRepository } from "@tessatv/domain";
 import type {
   MetadataDetails,
+  MetadataEpisode,
   MetadataMediaKind,
   MetadataProvider,
   MetadataSearchCandidate,
@@ -17,6 +18,8 @@ const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
  */
 export class CachedMetadataProvider implements MetadataProvider {
   readonly id: string;
+  /** Only present when the wrapped provider can list episodes. */
+  readonly fetchEpisodes?: (externalId: string) => Promise<MetadataEpisode[]>;
 
   constructor(
     private readonly inner: MetadataProvider,
@@ -24,6 +27,17 @@ export class CachedMetadataProvider implements MetadataProvider {
     private readonly ttlMs: number = DEFAULT_TTL_MS,
   ) {
     this.id = inner.id;
+    const fetchEpisodes = inner.fetchEpisodes?.bind(inner);
+    if (fetchEpisodes) {
+      this.fetchEpisodes = async (externalId) => {
+        const cacheKey = `episodes:${externalId}`;
+        const cached = await this.cache.get(this.id, cacheKey);
+        if (cached && Date.now() - cached.fetchedAt.getTime() < this.ttlMs) return cached.payload as MetadataEpisode[];
+        const episodes = await fetchEpisodes(externalId);
+        await this.cache.set({ provider: this.id, externalId: cacheKey, payload: episodes, fetchedAt: new Date() });
+        return episodes;
+      };
+    }
   }
 
   search(query: MetadataSearchQuery): Promise<MetadataSearchCandidate[]> {

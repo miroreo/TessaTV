@@ -1,6 +1,6 @@
 import { AuthService, OidcClient, SecretBox } from "@tessatv/auth";
 import { loadConfig } from "@tessatv/config";
-import { type MetadataProvidersByKind, refreshLibraryMetadata } from "@tessatv/library";
+import { type MetadataProvidersByKind, refreshLibraryMetadata, syncEpisodeTitles } from "@tessatv/library";
 import { deriveServerId } from "@tessatv/jellyfin-compat";
 import { JellyfinSdkSource } from "@tessatv/jellyfin-import";
 import { JobScheduler } from "@tessatv/jobs";
@@ -151,6 +151,10 @@ jobs.register({
     const summary = await refreshLibraryMetadata(libraryRepository, metadataProviders);
     if (summary.errors.length > 0) {
       app.log.warn({ errors: summary.errors }, "metadata-refresh job completed with errors");
+    }
+    const episodes = await syncEpisodeTitles(libraryRepository, metadataProviders);
+    if (episodes.errors.length > 0) {
+      app.log.warn({ errors: episodes.errors }, "metadata-refresh job: episode titles completed with errors");
     }
   },
 });

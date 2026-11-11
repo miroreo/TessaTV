@@ -348,6 +348,18 @@ the response carries `source` (the folder name) and `query`. The UI's "Fix match
 title page (admins only; `IdentifyDialog.svelte`) lists those candidates with poster, title,
 year and overview beside the scanned folder name, and applies the pick via `identify`.
 
+**Episode titles** (`syncEpisodeTitles` / `syncSeriesEpisodeTitles`): an episode's title is
+first guessed from its filename, and a rescan matches an existing episode by `(season,
+episode)` and only repoints its file, so a bad guess used to stay forever. `MetadataProvider`
+has an optional `fetchEpisodes`; `TvdbMetadataProvider` implements it
+(`/series/{id}/episodes/default/eng`, paged, aired order; cached by `CachedMetadataProvider`
+under `episodes:<id>`). The sync sets each episode node + unit title to the provider's name
+for that season/episode, skipping episodes the provider doesn't list (absolute-numbered anime
+mapped to season 1 mostly won't line up and keep their parsed title). It runs at the end of
+`importFolders` (so a rescan fixes titles), in the `metadata-refresh` job, and right after a
+manual identify of a series. The endpoint shape was written from TheTVDB's v4 docs and unit
+tests with a fake client, not yet run against the live API.
+
 `POST /api/library/auto-identify` (`autoIdentifyLibrary` in `packages/library`) sweeps
 every root node, picks the right provider for its media kind, and auto-applies the top
 search candidate — the "auto" policy built on the same primitives as the manual flow.
