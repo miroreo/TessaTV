@@ -1,17 +1,28 @@
 # Subtitle acquisition — plan
 
-Status (2026-11-11): **S1 built, not yet live-tested.** The owner said to start building, so
+Status (2026-11-11): **S1 and S2 built, not yet live-tested.** The owner said to start building, so
 the "build it in" answer to Q1 is taken. What exists: `packages/subtitles` (provider port,
 OpenSubtitles adapter, scorer, language normalization, charset/zip handling, file hash, sidecar
-naming, `SubtitleService` with throttling and pause-on-quota, `SubtitleAcquirer`, sweep), migration
-0015 and `DrizzleSubtitleRepository` (tested on a real Postgres), and a `subtitle-sweep` job in
-`apps/server` every 30 minutes. It is configured by env vars (`OPENSUBTITLES_*`,
-`SUBTITLE_LANGUAGES`, `SUBTITLE_HEARING_IMPAIRED`), not a settings page yet. Not built: playing
-downloaded subtitles in TessaTV's own player (S2: they're on disk, so Jellyfin/Plex/VLC see
-them), sidecar discovery in the scan, Subdl, settings/UI, per-unit queued jobs. Deviations from
-this plan: no `packages/jobs` payload extension yet (the sweep, newest first within a time
-budget, covers new imports; Q11 stays open for the later per-unit "search now"), and embedded
-tracks are checked with `probeMedia` inside the acquirer.
+naming, `SubtitleService` with throttling and pause-on-quota, `SubtitleAcquirer`, sweep, sidecar
+discovery), migration 0016 and `DrizzleSubtitleRepository` (tested on a real Postgres), and in
+`apps/server` a `subtitle-sweep` job (every 30 minutes, needs OpenSubtitles credentials) and a
+`subtitle-discovery` job (every 15 minutes, always on). Configuration is env vars
+(`OPENSUBTITLES_*`, `SUBTITLE_LANGUAGES`, `SUBTITLE_HEARING_IMPAIRED`), not a settings page yet.
+
+Playback (S2): subtitle files beside the video are listed after the embedded tracks in
+`GET /api/playback/:unitId`, with indexes from `EXTERNAL_SUBTITLE_INDEX_BASE` (10000) up, so the
+existing player picks them like any track and the UI needed no change. Picking one doesn't touch
+how the video is delivered; its VTT comes from `/api/playback/:unitId/subtitles/external/:id.vtt`
+(ffmpeg, with `-sub_charenc` when the file isn't UTF-8, checked against real ffmpeg). Discovery
+records files found beside videos as `sidecar-found`, and drops records whose file is gone: a
+deleted *downloaded* subtitle is blacklisted so it isn't fetched again, and a directory that can't
+be read (an offline share) is skipped rather than wiping its records. Language codes on external
+tracks are three-letter (`eng`) to match embedded tags; a few languages have two codes (`fra`
+vs `fre`), so a remembered choice may not carry across those.
+
+Not built: Subdl, settings/UI, a "search now"/blacklist button, per-unit queued jobs. Deviations
+from this plan: no `packages/jobs` payload extension yet (the sweep, newest first within a time
+budget, covers new imports; Q11 stays open for the later per-unit "search now").
 
 > **Verification caveat.** This was written from the repo plus prior knowledge of the provider
 > APIs. The cloud container could not reach the providers' documentation pages (outbound proxy
