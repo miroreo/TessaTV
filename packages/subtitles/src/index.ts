@@ -5,3 +5,5 @@ export * from "./score.js";
 export * from "./naming.js";
 export * from "./movie-hash.js";
 export * from "./opensubtitles.js";
+export * from "./normalize.js";
+export * from "./subtitle-service.js";

@@ -38,7 +38,7 @@ describe("scoreCandidate", () => {
   it("accepts an id and episode match with the right flags", () => {
     const scored = scoreCandidate(candidate(), query, slot)!;
     expect(scored.signals.map((s) => s.name)).toEqual(["id and episode match", "exact language", "hearing-impaired flag"]);
-    expect(scored.score).toBe(65);
+    expect(scored.score).toBe(70);
     expect(scored.accepted).toBe(true);
   });
 

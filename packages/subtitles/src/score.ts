@@ -33,6 +33,8 @@ export const MIN_ACCEPTED_SCORE = 60;
 const POINTS = {
   hash: 100,
   idWithEpisode: 50,
+  // A movie has no episode to line up, so an id match is as strong as it gets short of the hash.
+  movieId: 50,
   idOnly: 40,
   titleWithEpisode: 30,
   episodeMismatch: -100,
@@ -41,7 +43,8 @@ const POINTS = {
   source: 10,
   resolution: 5,
   videoCodec: 5,
-  exactRegion: 5,
+  exactLanguage: 10,
+  languageVariant: 5,
   hearingImpaired: 10,
   hearingImpairedWrong: -10,
   machineTranslated: -30,
@@ -59,7 +62,7 @@ function matchSignals(candidate: SubtitleCandidate, query: SubtitleQuery): Score
   if (candidate.matchedBy.includes("hash")) return [{ name: "file hash", points: POINTS.hash }];
   const byId = candidate.matchedBy.some((m) => m === "imdb" || m === "tmdb" || m === "tvdb");
   if (query.kind === "movie") {
-    return byId ? [{ name: "id match", points: POINTS.idOnly }] : [];
+    return byId ? [{ name: "id match", points: POINTS.movieId }] : [];
   }
   const known = candidate.season !== null && candidate.episode !== null;
   if (known && (candidate.season !== query.season || candidate.episode !== query.episode)) {
@@ -90,7 +93,7 @@ export function scoreCandidate(candidate: SubtitleCandidate, query: SubtitleQuer
   if (primaryLanguage(candidate.language) !== primaryLanguage(slot.language)) return null;
 
   const signals: ScoreSignal[] = [...matchSignals(candidate, query)];
-  if (candidate.language === slot.language) signals.push({ name: "exact language", points: POINTS.exactRegion });
+  signals.push(candidate.language === slot.language ? { name: "exact language", points: POINTS.exactLanguage } : { name: "language variant", points: POINTS.languageVariant });
 
   if (candidate.forced !== slot.forced) signals.push({ name: "wrong forced flag", points: POINTS.forcedMismatch });
 

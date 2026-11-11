@@ -16,6 +16,10 @@
   "dependencies": {
     "@ctrl/video-filename-parser": "^5.12.0",
     "@tessatv/domain": "workspace:*",
+    "bottleneck": "^2.19.5",
+    "chardet": "^2.2.0",
+    "fflate": "^0.8.3",
+    "iconv-lite": "^0.7.3",
     "iso-639-3": "^3.0.1",
     "ky": "^2.2.0"
   }
