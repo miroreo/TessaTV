@@ -7,3 +7,4 @@ export * from "./movie-hash.js";
 export * from "./opensubtitles.js";
 export * from "./normalize.js";
 export * from "./subtitle-service.js";
+export * from "./acquire.js";

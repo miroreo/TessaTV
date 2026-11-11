@@ -41,7 +41,11 @@ export function subtitleSlotKey(slot: SubtitleSlot): string {
 export interface SubtitleSearchRecord {
   readonly unitId: string;
   readonly slotKey: string;
-  readonly outcome: "none" | "unavailable";
+  /**
+   * `none`: searched, nothing good enough yet. `unavailable`: every provider was failing or
+   * paused, so nothing was learned. `embedded`: the video already carries a text track for it.
+   */
+  readonly outcome: "none" | "unavailable" | "embedded";
   readonly attempts: number;
   readonly attemptedAt: Date;
   /** Not searched again before this. */

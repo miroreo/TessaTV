@@ -2,7 +2,10 @@ import Bottleneck from "bottleneck";
 import { AuthFailedError, QuotaExhaustedError, RateLimitedError } from "./errors.js";
 import { normalizeSubtitle, type SubtitleFile } from "./normalize.js";
 import { rankCandidates, type ScoredCandidate, type SubtitlePreference } from "./score.js";
-import type { SubtitleProvider, SubtitleQuery } from "./subtitle-provider.js";
+import type { SubtitleCandidate, SubtitleProvider, SubtitleQuery } from "./subtitle-provider.js";
+
+/** Skips candidates (blacklisted ones, say) before they are ranked. */
+export type CandidateFilter = (candidate: SubtitleCandidate) => boolean;
 
 export interface ProviderFailure {
   readonly provider: string;
@@ -58,7 +61,7 @@ export class SubtitleService {
     return times.length > 0 ? new Date(Math.min(...times)) : null;
   }
 
-  async search(query: SubtitleQuery, slot: SubtitlePreference): Promise<{ ranked: ScoredCandidate[]; failures: ProviderFailure[]; searched: number }> {
+  async search(query: SubtitleQuery, slot: SubtitlePreference, exclude?: CandidateFilter): Promise<{ ranked: ScoredCandidate[]; failures: ProviderFailure[]; searched: number }> {
     const slotQuery: SubtitleQuery = { ...query, languages: [slot.language], forced: slot.forced };
     const failures: ProviderFailure[] = [];
     const active = this.providers.filter((provider) => !this.isPaused(provider.id));
@@ -73,12 +76,12 @@ export class SubtitleService {
         }
       }),
     );
-    return { ranked: rankCandidates(results.flat(), slotQuery, slot), failures, searched: active.length };
+    return { ranked: rankCandidates(exclude ? results.flat().filter((candidate) => !exclude(candidate)) : results.flat(), slotQuery, slot), failures, searched: active.length };
   }
 
   /** Searches, then downloads the best candidate that is good enough and actually decodes. */
-  async fetchBest(query: SubtitleQuery, slot: SubtitlePreference): Promise<FetchOutcome> {
-    const { ranked, failures, searched } = await this.search(query, slot);
+  async fetchBest(query: SubtitleQuery, slot: SubtitlePreference, exclude?: CandidateFilter): Promise<FetchOutcome> {
+    const { ranked, failures, searched } = await this.search(query, slot, exclude);
     const accepted = ranked.filter((scored) => scored.accepted);
 
     let attempts = 0;
