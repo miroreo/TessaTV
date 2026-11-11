@@ -264,11 +264,14 @@ export interface ServerSettingsResponse {
   } | null;
   readonly jellyfin: { readonly url: string; readonly hasApiKey: boolean } | null;
   readonly fileHealthCheck: boolean;
+  readonly fileHealthFullSpeed: boolean;
 }
 
 /** `GET /api/file-health` (admins only): the background decode check, for the settings page. */
 export interface FileHealthStatusResponse {
   readonly enabled: boolean;
+  /** Whether the check is running unthrottled; see `ServerSettings.fileHealthFullSpeed`. */
+  readonly fullSpeed: boolean;
   /** `waiting` while a transcode is running; `idle` when there's nothing left to check. */
   readonly state: "disabled" | "waiting" | "checking" | "idle";
   /** The file being decoded right now. Position and fps update about twice a second. */

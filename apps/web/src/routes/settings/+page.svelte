@@ -101,12 +101,11 @@
     idle: "Everything is checked",
   };
 
-  async function setFileHealthCheck(event: Event) {
-    const enabled = (event.currentTarget as HTMLInputElement).checked;
+  async function setFileHealth(change: { fileHealthCheck: boolean } | { fileHealthFullSpeed: boolean }) {
     savingHealth = true;
     healthError = null;
     try {
-      await api<ServerSettingsResponse>(fetch, "/api/settings", { method: "PATCH", body: JSON.stringify({ fileHealthCheck: enabled }) });
+      await api<ServerSettingsResponse>(fetch, "/api/settings", { method: "PATCH", body: JSON.stringify(change) });
       liveHealth = await api<FileHealthStatusResponse>(fetch, "/api/file-health");
     } catch (cause) {
       healthError = (cause as Error).message;
@@ -283,9 +282,32 @@
       Each file is checked again every 90 days, or when it changes.
     </p>
     <label class="label cursor-pointer justify-start gap-3">
-      <input type="checkbox" class="toggle toggle-warning" checked={health.enabled} onchange={setFileHealthCheck} disabled={savingHealth} />
+      <input
+        type="checkbox"
+        class="toggle toggle-warning"
+        checked={health.enabled}
+        onchange={(event) => setFileHealth({ fileHealthCheck: event.currentTarget.checked })}
+        disabled={savingHealth}
+      />
       <span class="text-base-content">Check files in the background</span>
       {#if savingHealth}<span class="loading loading-spinner loading-sm"></span>{/if}
+    </label>
+    <label class="label cursor-pointer items-start justify-start gap-3">
+      <input
+        type="checkbox"
+        class="toggle toggle-warning mt-0.5"
+        checked={health.fullSpeed}
+        onchange={(event) => setFileHealth({ fileHealthFullSpeed: event.currentTarget.checked })}
+        disabled={savingHealth || !health.enabled}
+      />
+      <span class="text-base-content">
+        Full speed
+        <span class="block text-sm opacity-70">
+          Decodes as fast as the disk and every CPU core allow, and keeps going while videos transcode (still at the lowest
+          priority, so playback wins any tug of war). Meant for catching up on a library; it doesn't switch itself off, so turn it
+          back off afterwards. Takes effect straight away, restarting the file in progress.
+        </span>
+      </span>
     </label>
     {#if healthError}<div class="alert alert-error">{healthError}</div>{/if}
     <div class="stats stats-vertical sm:stats-horizontal bg-base-100 w-full">

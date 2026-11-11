@@ -8,8 +8,10 @@ import { runCommand, type CommandRunner } from "./process.js";
 export interface FileHealthCheckOptions {
   readonly ffmpegPath?: string;
   readonly runner?: CommandRunner;
-  /** How fast ffmpeg may read the file, in multiples of realtime. */
+  /** How fast ffmpeg may read the file, in multiples of realtime. Ignored at full speed. */
   readonly readRate?: number;
+  /** No read-rate throttle and every CPU core, instead of one throttled thread. Still at the lowest priority. */
+  readonly fullSpeed?: boolean;
   readonly signal?: AbortSignal;
   /** Called about twice a second with how far the decode has got. */
   readonly onProgress?: (progress: FfmpegProgress) => void;
@@ -26,7 +28,8 @@ const MAX_ERROR_CHARS = 500;
  * complained about, or null when the file is clean. Deliberately software-only: a damaged
  * file can hang a GPU decoder, which is exactly what this exists to find out safely. Runs
  * at the lowest CPU priority, on one thread, throttled to `readRate`× realtime so a check
- * never gets in playback's way; a long film takes the better part of an hour.
+ * never gets in playback's way; a long film takes the better part of an hour. `fullSpeed`
+ * lifts the throttle and the thread limit, for catching up on a library.
  */
 export async function checkFileHealth(path: string, options: FileHealthCheckOptions = {}): Promise<string | null> {
   const runner = options.runner ?? runCommand;
@@ -40,8 +43,7 @@ export async function checkFileHealth(path: string, options: FileHealthCheckOpti
       "-v", "error", "-nostats", "-progress", "pipe:1",
       // Stop at the first hard decode error instead of reading on to the end.
       "-xerror",
-      "-threads", "1",
-      "-readrate", String(options.readRate ?? DEFAULT_READ_RATE),
+      ...(options.fullSpeed ? [] : ["-threads", "1", "-readrate", String(options.readRate ?? DEFAULT_READ_RATE)]),
       "-i", path,
       // Optional (`?`) so a file with no audio isn't reported as broken.
       "-map", "0:v:0?", "-map", "0:a:0?",
@@ -72,12 +74,14 @@ export interface FileHealthProgress {
   /** How far into the file the decode has got. */
   readonly positionSeconds: number;
   readonly fps: number | null;
-  /** Relative to realtime; throttled to a few times realtime on purpose. */
+  /** Relative to realtime; throttled to a few times realtime unless running at full speed. */
   readonly speed: number | null;
 }
 
 export interface FileHealthMonitorStatus {
   readonly state: FileHealthMonitorState;
+  /** Whether checks are running unthrottled right now. */
+  readonly fullSpeed: boolean;
   readonly current: FileHealthProgress | null;
 }
 
@@ -85,7 +89,12 @@ export interface FileHealthMonitorOptions {
   readonly repository: FileHealthRepository;
   /** Read before every file and while one is being checked: turning it off stops the check in progress. */
   readonly isEnabled: () => Promise<boolean>;
-  /** True while something more important is using the CPU (a running transcode); checks wait. */
+  /**
+   * Read like `isEnabled`: at full speed checks are unthrottled and don't wait for transcodes,
+   * and a change restarts the check in progress so it takes effect now.
+   */
+  readonly isFullSpeed?: () => Promise<boolean>;
+  /** True while something more important is using the CPU (a running transcode); checks wait, except at full speed. */
   readonly isBusy: () => boolean;
   readonly onChecked?: (path: string, error: string | null) => void;
   readonly onError?: (path: string, error: Error) => void;
@@ -98,7 +107,7 @@ export interface FileHealthMonitorOptions {
   /** How often a running check looks at whether it's still enabled. */
   readonly enabledPollMs?: number;
   /** Test seams. */
-  readonly check?: (path: string, signal: AbortSignal, onProgress: (progress: FfmpegProgress) => void) => Promise<string | null>;
+  readonly check?: (path: string, signal: AbortSignal, onProgress: (progress: FfmpegProgress) => void, fullSpeed: boolean) => Promise<string | null>;
   readonly duration?: (path: string) => Promise<number | null>;
   readonly exists?: (path: string) => Promise<boolean>;
   readonly now?: () => number;
@@ -116,6 +125,7 @@ export class FileHealthMonitor {
   private loop: Promise<void> | null = null;
   private readonly skipped = new Set<string>();
   private currentState: FileHealthMonitorState = "idle";
+  private fullSpeed = false;
   private current: FileHealthProgress | null = null;
   private readonly check: NonNullable<FileHealthMonitorOptions["check"]>;
   private readonly duration: (path: string) => Promise<number | null>;
@@ -123,14 +133,14 @@ export class FileHealthMonitor {
   private readonly now: () => number;
 
   constructor(private readonly options: FileHealthMonitorOptions) {
-    this.check = options.check ?? ((path, signal, onProgress) => checkFileHealth(path, { signal, onProgress }));
+    this.check = options.check ?? ((path, signal, onProgress, fullSpeed) => checkFileHealth(path, { signal, onProgress, fullSpeed }));
     this.duration = options.duration ?? ((path) => probeMedia(path).then((media) => media.durationSeconds, () => null));
     this.exists = options.exists ?? ((path) => access(path).then(() => true, () => false));
     this.now = options.now ?? Date.now;
   }
 
   status(): FileHealthMonitorStatus {
-    return { state: this.currentState, current: this.current };
+    return { state: this.currentState, fullSpeed: this.fullSpeed, current: this.current };
   }
 
   start(): void {
@@ -148,6 +158,10 @@ export class FileHealthMonitor {
     return this.options.isEnabled().catch(() => false);
   }
 
+  private async readFullSpeed(): Promise<boolean> {
+    return this.options.isFullSpeed ? this.options.isFullSpeed().catch(() => false) : false;
+  }
+
   private async run(): Promise<void> {
     const { idleMs = 10 * 60_000, busyMs = 60_000, disabledMs = 30_000 } = this.options;
     while (!this.abort.signal.aborted) {
@@ -155,7 +169,7 @@ export class FileHealthMonitor {
       if (!(await this.enabled())) {
         this.currentState = "disabled";
         delay = disabledMs;
-      } else if (this.options.isBusy()) {
+      } else if (!(this.fullSpeed = await this.readFullSpeed()) && this.options.isBusy()) {
         this.currentState = "waiting";
         delay = busyMs;
       } else if (await this.checkNext()) {
@@ -181,11 +195,15 @@ export class FileHealthMonitor {
     const file = due.find((candidate) => !this.skipped.has(candidate.id));
     if (!file) return false;
 
-    // Aborted by `stop()`, or by this check's own watcher when the setting is turned off.
-    const disabled = new AbortController();
-    const signal = AbortSignal.any([this.abort.signal, disabled.signal]);
+    // Aborted by `stop()`, or by this check's own watcher when the setting is turned off or
+    // full speed is switched, so a change takes effect on the file in progress, not the next one.
+    const fullSpeed = this.fullSpeed;
+    const changed = new AbortController();
+    const signal = AbortSignal.any([this.abort.signal, changed.signal]);
     const watcher = setInterval(() => {
-      void this.enabled().then((on) => !on && disabled.abort());
+      void Promise.all([this.enabled(), this.readFullSpeed()]).then(([on, speed]) => {
+        if (!on || speed !== fullSpeed) changed.abort();
+      });
     }, this.options.enabledPollMs ?? 15_000);
     this.currentState = "checking";
     const current: FileHealthProgress = { path: file.path, startedAt: new Date(this.now()), durationSeconds: null, positionSeconds: 0, fps: null, speed: null };
@@ -193,15 +211,20 @@ export class FileHealthMonitor {
     try {
       if (!(await this.exists(file.path))) throw new Error("File not found");
       this.current = { ...current, durationSeconds: await this.duration(file.path) };
-      const error = await this.check(file.path, signal, ({ outTimeSeconds, fps, speed }) => {
-        if (this.current) this.current = { ...this.current, positionSeconds: outTimeSeconds, fps, speed };
-      });
-      if (signal.aborted) return disabled.signal.aborted;
+      const error = await this.check(
+        file.path,
+        signal,
+        ({ outTimeSeconds, fps, speed }) => {
+          if (this.current) this.current = { ...this.current, positionSeconds: outTimeSeconds, fps, speed };
+        },
+        fullSpeed,
+      );
+      if (signal.aborted) return changed.signal.aborted;
       await this.options.repository.save({ mediaFileId: file.id, checkedAt: new Date(this.now()), sizeBytes: file.sizeBytes, error });
       this.options.onChecked?.(file.path, error);
     } catch (error) {
-      // Stopped for good: no. Turned off mid-check: yes, so the loop sees the setting at once.
-      if (signal.aborted) return disabled.signal.aborted;
+      // Stopped for good: no. A setting changed mid-check: yes, so the loop sees it at once.
+      if (signal.aborted) return changed.signal.aborted;
       this.skipped.add(file.id);
       this.options.onError?.(file.path, error as Error);
     } finally {

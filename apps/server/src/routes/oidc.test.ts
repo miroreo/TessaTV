@@ -56,7 +56,7 @@ class Sessions implements AuthSessionRepository {
 }
 
 class Settings implements ServerSettingsRepository {
-  settings: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true };
+  settings: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false };
   async get() {
     return this.settings;
   }

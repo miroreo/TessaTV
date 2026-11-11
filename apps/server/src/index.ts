@@ -155,6 +155,7 @@ jobs.register({
 const fileHealth = new FileHealthMonitor({
   repository: fileHealthRepository,
   isEnabled: async () => (await serverSettings.get()).fileHealthCheck,
+  isFullSpeed: async () => (await serverSettings.get()).fileHealthFullSpeed,
   isBusy: () => transcodes.runningCount > 0,
   onChecked: (path, error) =>
     error ? app.log.warn({ path, error }, "file failed its decode check") : app.log.debug({ path }, "file passed its decode check"),

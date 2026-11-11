@@ -20,14 +20,15 @@ const DAMAGED_FILES_SHOWN = 100;
 export function registerFileHealthRoutes(app: FastifyInstance, deps: FileHealthDependencies): void {
   app.get("/api/file-health", { preHandler: requireAdmin }, async (): Promise<FileHealthStatusResponse> => {
     const staleBefore = new Date(Date.now() - FILE_HEALTH_RECHECK_DAYS * 24 * 60 * 60 * 1000);
-    const [enabled, summary, damaged] = await Promise.all([
-      deps.settings.get().then((settings) => settings.fileHealthCheck),
+    const [{ fileHealthCheck: enabled, fileHealthFullSpeed: fullSpeed }, summary, damaged] = await Promise.all([
+      deps.settings.get(),
       deps.repository.summary(staleBefore),
       deps.repository.listDamaged(DAMAGED_FILES_SHOWN),
     ]);
     const { state, current } = deps.status();
     return {
       enabled,
+      fullSpeed,
       // The monitor notices a change to the setting within seconds; don't show stale activity meanwhile.
       state: enabled ? state : "disabled",
       current: enabled && current ? { ...current, startedAt: current.startedAt.toISOString() } : null,

@@ -591,6 +591,13 @@ checked of total, how many are waiting, what's being decoded right now, and the 
 files with ffmpeg's first error. `waiting` means paused for a running transcode; `idle`,
 nothing left to check.
 
+**Full speed** (`fileHealthFullSpeed`, a second toggle on the same card; off by default)
+is for catching up on a big library: ffmpeg runs without `-readrate` and without the
+one-thread limit, and the monitor stops pausing for transcodes. It stays at `nice -n 19`,
+so playback still wins any contention for the CPU. It's read like the on/off setting, and
+a change restarts the file in progress so it takes effect immediately (the decode of that
+file starts over). It doesn't switch itself off.
+
 **Volume normalization** (on by default, toggle in the player, remembered per browser):
 the `loudness-scan` job (pg-boss, every 15 min, ≤10 min per run so it fits pg-boss's job
 expiry) measures each file's default audio stream with ffmpeg's `ebur128` filter (EBU R128 /

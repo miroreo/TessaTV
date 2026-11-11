@@ -47,6 +47,12 @@ export interface ServerSettings {
    * off also stops damaged results from changing how files play.
    */
   readonly fileHealthCheck: boolean;
+  /**
+   * Run the file health check flat out: no read-rate throttle, every CPU core, and no pausing
+   * while a transcode runs (it still runs at the lowest priority). For catching up on a
+   * library, then switching back; it doesn't switch itself off.
+   */
+  readonly fileHealthFullSpeed: boolean;
 }
 
-export const DEFAULT_SERVER_SETTINGS: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true };
+export const DEFAULT_SERVER_SETTINGS: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false };

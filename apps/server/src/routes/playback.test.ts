@@ -119,7 +119,7 @@ class InMemoryProgress implements WatchProgressRepository {
 }
 
 class InMemorySettings implements ServerSettingsRepository {
-  settings: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true };
+  settings: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false };
   async get() {
     return this.settings;
   }
@@ -250,7 +250,7 @@ describe("browse, playback and progress routes", () => {
     headers = { authorization: `Bearer ${token}` };
     app = buildApp({
       settings,
-      fileHealth: { repository: fileHealth, status: () => ({ state: "checking", current: { path: "/media/e1.mkv", startedAt: new Date(7000), durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 } }) },
+      fileHealth: { repository: fileHealth, status: () => ({ state: "checking", fullSpeed: false, current: { path: "/media/e1.mkv", startedAt: new Date(7000), durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 } }) },
       libraryRepository: library,
       metadataProviders: {},
       auth,
@@ -344,7 +344,7 @@ describe("browse, playback and progress routes", () => {
 
   it("caps every stream at the admin's maximum resolution, transcoding a file that would direct play", async () => {
     const patched = await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: 480 } });
-    expect(patched.json()).toEqual({ maxStreamHeight: 480, oidc: null, jellyfin: null, fileHealthCheck: true });
+    expect(patched.json()).toEqual({ maxStreamHeight: 480, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false });
     try {
       const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
       expect(started.json()).toMatchObject({ mode: "transcode", reasons: ["VideoResolutionNotSupported"] });
@@ -355,7 +355,7 @@ describe("browse, playback and progress routes", () => {
     } finally {
       await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: null } });
     }
-    expect((await app.inject({ method: "GET", url: "/api/settings", headers })).json()).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true });
+    expect((await app.inject({ method: "GET", url: "/api/settings", headers })).json()).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false });
     expect((await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { maxStreamHeight: 999 } })).statusCode).toBe(400);
     const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
     expect(started.json()).toMatchObject({ mode: "direct-play" });
@@ -378,6 +378,7 @@ describe("browse, playback and progress routes", () => {
     const status = (await app.inject({ method: "GET", url: "/api/file-health", headers })).json();
     expect(status).toEqual({
       enabled: true,
+      fullSpeed: false,
       state: "checking",
       current: { path: "/media/e1.mkv", startedAt: new Date(7000).toISOString(), durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 },
       total: 3, clean: 1, damaged: 1, due: 1,
@@ -388,6 +389,12 @@ describe("browse, playback and progress routes", () => {
       expect((await app.inject({ method: "GET", url: "/api/file-health", headers })).json()).toMatchObject({ enabled: false, state: "disabled", current: null });
     } finally {
       await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthCheck: true } });
+    }
+    await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthFullSpeed: true } });
+    try {
+      expect((await app.inject({ method: "GET", url: "/api/file-health", headers })).json()).toMatchObject({ fullSpeed: true });
+    } finally {
+      await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthFullSpeed: false } });
     }
     expect((await app.inject({ method: "GET", url: "/api/file-health" })).statusCode).toBe(401);
   });

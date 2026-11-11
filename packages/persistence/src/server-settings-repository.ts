@@ -17,6 +17,7 @@ const PARSERS: { [K in keyof ServerSettings]: (value: unknown) => ServerSettings
   oidc: (value) => (value === null ? null : parseOidc(value)),
   jellyfin: (value) => (value === null ? null : parseJellyfin(value)),
   fileHealthCheck: (value) => (typeof value === "boolean" ? value : undefined),
+  fileHealthFullSpeed: (value) => (typeof value === "boolean" ? value : undefined),
 };
 
 function parseJellyfin(value: unknown): JellyfinImportSettings | undefined {

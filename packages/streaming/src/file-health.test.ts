@@ -29,6 +29,20 @@ describe("checkFileHealth", () => {
     expect(await checkFileHealth("/a", { runner: async () => result(1) })).toBe("ffmpeg exited with code 1");
   });
 
+  it("at full speed drops the read-rate throttle and the one-thread limit, but keeps the lowest priority", async () => {
+    let command: readonly string[] = [];
+    const runner: CommandRunner = async (name, args) => {
+      command = [name, ...args];
+      return result(0);
+    };
+    await checkFileHealth("/a", { runner, fullSpeed: true });
+    expect(command.slice(0, 4)).toEqual(["nice", "-n", "19", "ffmpeg"]);
+    expect(command).not.toContain("-readrate");
+    expect(command).not.toContain("-threads");
+    await checkFileHealth("/a", { runner });
+    expect(command).toEqual(expect.arrayContaining(["-readrate", "4", "-threads", "1"]));
+  });
+
   it("reports progress from ffmpeg's -progress output while it runs", async () => {
     let command: readonly string[] = [];
     const seen: number[] = [];
@@ -203,6 +217,58 @@ describe("FileHealthMonitor", () => {
     expect(monitor.status().current).toMatchObject({ durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 });
     finish();
     await until(() => monitor.status().current === null);
+    await monitor.stop();
+  });
+
+  it("keeps checking through a transcode at full speed, telling the check so", async () => {
+    const repository = new FakeRepository([...files]);
+    const modes: boolean[] = [];
+    const monitor = new FileHealthMonitor({
+      repository,
+      isEnabled: async () => true,
+      isFullSpeed: async () => true,
+      isBusy: () => true,
+      check: async (_path, _signal, _onProgress, fullSpeed) => {
+        modes.push(fullSpeed);
+        return null;
+      },
+      exists: async () => true,
+      duration: async () => null,
+      busyMs: 5,
+      idleMs: 5,
+    });
+    monitor.start();
+    await until(() => repository.saved.length === 2);
+    expect(modes).toEqual([true, true]);
+    expect(monitor.status().fullSpeed).toBe(true);
+    await monitor.stop();
+  });
+
+  it("restarts the check in progress when full speed is switched, so it takes effect now", async () => {
+    const repository = new FakeRepository([files[0]!]);
+    let fullSpeed = false;
+    const started: boolean[] = [];
+    const monitor = new FileHealthMonitor({
+      repository,
+      isEnabled: async () => true,
+      isFullSpeed: async () => fullSpeed,
+      isBusy: () => false,
+      exists: async () => true,
+      duration: async () => null,
+      check: (_path, signal, _onProgress, mode) =>
+        new Promise((resolve, reject) => {
+          started.push(mode);
+          if (mode) resolve(null);
+          else signal.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+      enabledPollMs: 5,
+      idleMs: 5,
+    });
+    monitor.start();
+    await until(() => started.length === 1);
+    fullSpeed = true;
+    await until(() => repository.saved.length === 1);
+    expect(started).toEqual([false, true]);
     await monitor.stop();
   });
 
