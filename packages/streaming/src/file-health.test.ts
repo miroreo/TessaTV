@@ -18,13 +18,31 @@ describe("checkFileHealth", () => {
     expect(command).not.toContain("-hwaccel");
   });
 
-  it("is damaged only when ffmpeg exits non-zero, not for warnings on a clean decode", async () => {
+  it("is damaged when ffmpeg exits non-zero or prints errors, even on a zero exit", async () => {
     expect(await checkFileHealth("/a", { runner: async () => result(0) })).toBeNull();
-    expect(await checkFileHealth("/a", { runner: async () => result(0, "Non-monotonic DTS\n") })).toBeNull();
+    expect(await checkFileHealth("/a", { runner: async () => result(0, "[hevc] Error constructing the frame RPS.\n") })).toBe(
+      "[hevc] Error constructing the frame RPS.",
+    );
     expect(await checkFileHealth("/a", { runner: async () => result(183, "[h264] error while decoding MB 4 2\n") })).toBe(
       "[h264] error while decoding MB 4 2",
     );
     expect(await checkFileHealth("/a", { runner: async () => result(1) })).toBe("ffmpeg exited with code 1");
+  });
+
+  it("reports progress from ffmpeg's -progress output while it runs", async () => {
+    let command: readonly string[] = [];
+    const seen: number[] = [];
+    await checkFileHealth("/a", {
+      onProgress: ({ outTimeSeconds }) => seen.push(outTimeSeconds),
+      runner: async (name, args, options) => {
+        command = [name, ...args];
+        options?.onStdout?.("fps=90\nout_time_us=5000000\nspeed=4x\nprogress=continue\n");
+        options?.onStdout?.("fps=95\nout_time_us=6000000\nspeed=4x\nprogress=end\n");
+        return result(0);
+      },
+    });
+    expect(command).toEqual(expect.arrayContaining(["-progress", "pipe:1"]));
+    expect(seen).toEqual([5, 6]);
   });
 
   it("stops at the first decode error", async () => {
@@ -159,6 +177,32 @@ describe("FileHealthMonitor", () => {
     await until(() => monitor.status().state === "disabled");
     expect(monitor.status().current).toBeNull();
     expect(repository.saved).toHaveLength(0);
+    await monitor.stop();
+  });
+
+  it("exposes how far the file being checked has got: length, position, fps and speed", async () => {
+    const repository = new FakeRepository([files[0]!]);
+    let finish: () => void = () => undefined;
+    let report: Parameters<NonNullable<ConstructorParameters<typeof FileHealthMonitor>[0]["check"]>>[2] = () => undefined;
+    const monitor = new FileHealthMonitor({
+      repository,
+      isEnabled: async () => true,
+      isBusy: () => false,
+      exists: async () => true,
+      duration: async () => 600,
+      check: (_path, _signal, onProgress) =>
+        new Promise((resolve) => {
+          report = onProgress;
+          finish = () => resolve(null);
+        }),
+    });
+    monitor.start();
+    await until(() => monitor.status().current?.durationSeconds === 600);
+    expect(monitor.status().current).toMatchObject({ path: "/media/1.mkv", positionSeconds: 0, fps: null, speed: null });
+    report({ outTimeSeconds: 150, fps: 96, speed: 4 });
+    expect(monitor.status().current).toMatchObject({ durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 });
+    finish();
+    await until(() => monitor.status().current === null);
     await monitor.stop();
   });
 

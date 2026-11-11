@@ -30,7 +30,7 @@ export function registerFileHealthRoutes(app: FastifyInstance, deps: FileHealthD
       enabled,
       // The monitor notices a change to the setting within seconds; don't show stale activity meanwhile.
       state: enabled ? state : "disabled",
-      current: enabled && current ? { path: current.path, startedAt: current.startedAt.toISOString() } : null,
+      current: enabled && current ? { ...current, startedAt: current.startedAt.toISOString() } : null,
       ...summary,
       damagedFiles: damaged.map(({ path, error, checkedAt }) => ({ path, error, checkedAt: checkedAt.toISOString() })),
     };

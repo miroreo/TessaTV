@@ -72,6 +72,8 @@
   const health = $derived(liveHealth ?? data.fileHealth);
   let savingHealth = $state(false);
   let healthError = $state<string | null>(null);
+  // Quicker while a file is being decoded, so its progress moves.
+  const healthPollMs = $derived(health.current ? 3_000 : 10_000);
   $effect(() => {
     const timer = setInterval(async () => {
       try {
@@ -79,9 +81,18 @@
       } catch {
         // A missed refresh just shows the previous numbers.
       }
-    }, 10_000);
+    }, healthPollMs);
     return () => clearInterval(timer);
   });
+
+  function clock(seconds: number): string {
+    const whole = Math.max(0, Math.floor(seconds));
+    const [h, m, s] = [Math.floor(whole / 3600), Math.floor((whole % 3600) / 60), whole % 60];
+    return `${h > 0 ? `${h}:${String(m).padStart(2, "0")}` : m}:${String(s).padStart(2, "0")}`;
+  }
+  const healthPercent = $derived(
+    health.current?.durationSeconds ? Math.min(100, (health.current.positionSeconds / health.current.durationSeconds) * 100) : null,
+  );
 
   const HEALTH_STATE_LABEL: Record<FileHealthStatusResponse["state"], string> = {
     disabled: "Off",
@@ -290,11 +301,22 @@
       <div class="stat">
         <div class="stat-title">Status</div>
         <div class="stat-value text-lg">{HEALTH_STATE_LABEL[health.state]}</div>
-        {#if health.current}
-          <div class="stat-desc break-all">{health.current.path}</div>
-        {/if}
       </div>
     </div>
+    {#if health.current}
+      <div class="bg-base-100 rounded-box space-y-2 p-4" aria-live="off">
+        <div class="font-mono text-sm break-all">{health.current.path}</div>
+        <progress class="progress progress-warning w-full" value={healthPercent ?? undefined} max="100"></progress>
+        <div class="flex flex-wrap gap-x-4 text-sm opacity-80">
+          <span>{healthPercent !== null ? `${healthPercent.toFixed(1)}%` : "length unknown"}</span>
+          <span>
+            {clock(health.current.positionSeconds)}{health.current.durationSeconds ? ` / ${clock(health.current.durationSeconds)}` : ""}
+          </span>
+          {#if health.current.fps !== null}<span>{health.current.fps.toFixed(0)} fps</span>{/if}
+          {#if health.current.speed !== null}<span>{health.current.speed.toFixed(1)}× realtime</span>{/if}
+        </div>
+      </div>
+    {/if}
     {#if health.damagedFiles.length > 0}
       <h3 class="mt-2 font-semibold">Damaged files</h3>
       <ul class="divide-base-300 divide-y text-sm">

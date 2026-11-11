@@ -250,7 +250,7 @@ describe("browse, playback and progress routes", () => {
     headers = { authorization: `Bearer ${token}` };
     app = buildApp({
       settings,
-      fileHealth: { repository: fileHealth, status: () => ({ state: "checking", current: { path: "/media/e1.mkv", startedAt: new Date(7000) } }) },
+      fileHealth: { repository: fileHealth, status: () => ({ state: "checking", current: { path: "/media/e1.mkv", startedAt: new Date(7000), durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 } }) },
       libraryRepository: library,
       metadataProviders: {},
       auth,
@@ -379,7 +379,7 @@ describe("browse, playback and progress routes", () => {
     expect(status).toEqual({
       enabled: true,
       state: "checking",
-      current: { path: "/media/e1.mkv", startedAt: new Date(7000).toISOString() },
+      current: { path: "/media/e1.mkv", startedAt: new Date(7000).toISOString(), durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 },
       total: 3, clean: 1, damaged: 1, due: 1,
       damagedFiles: [{ path: "/media/film.mp4", error: "error while decoding MB 3 13", checkedAt: new Date(5000).toISOString() }],
     });

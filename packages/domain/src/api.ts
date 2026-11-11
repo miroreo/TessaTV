@@ -271,7 +271,16 @@ export interface FileHealthStatusResponse {
   readonly enabled: boolean;
   /** `waiting` while a transcode is running; `idle` when there's nothing left to check. */
   readonly state: "disabled" | "waiting" | "checking" | "idle";
-  readonly current: { readonly path: string; readonly startedAt: string } | null;
+  /** The file being decoded right now. Position and fps update about twice a second. */
+  readonly current: {
+    readonly path: string;
+    readonly startedAt: string;
+    /** Null when the file's length couldn't be read. */
+    readonly durationSeconds: number | null;
+    readonly positionSeconds: number;
+    readonly fps: number | null;
+    readonly speed: number | null;
+  } | null;
   readonly total: number;
   readonly clean: number;
   readonly damaged: number;

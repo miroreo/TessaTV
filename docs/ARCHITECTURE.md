@@ -570,9 +570,11 @@ player shows a large play button in that case rather than sitting silently pause
 
 **File health check** (`FileHealthMonitor`, `packages/streaming/src/file-health.ts`): a
 background loop decodes every media file end to end on the CPU — `nice -n 19`, one thread,
-`-readrate 4` — and records the result in `file_health` (migration 0015). `-xerror` makes a
-decode error exit non-zero, and only that counts as damage: plain warnings (odd timestamps)
-are common on healthy files. Order: never-checked files (newest import first), files whose
+`-readrate 4` — and records the result in `file_health` (migration 0015). Damage is a
+non-zero exit *or any output at `-v error`* (which hides warnings such as odd timestamps):
+ffmpeg exits 0 on plenty of real corruption — a HEVC stream with broken references, a
+Matroska element overrunning its parent — and only logs it. Found by corrupting a HEVC
+file: the exit code alone missed it, though H.264 in MP4 exited 183. Order: never-checked files (newest import first), files whose
 size changed, then each file again after 90 days. It waits while any transcode is running,
 and skips a file it can't run on (missing, ffmpeg absent) until the next restart. It is a
 loop rather than a pg-boss job because one check of a long film outlasts a job's 15-minute

@@ -32,6 +32,8 @@ export interface CommandRunOptions {
   readonly signal?: AbortSignal;
   /** Kills the command after this long. */
   readonly timeoutMs?: number;
+  /** Called with stdout as it arrives, for live progress; the full output is still returned at the end. */
+  readonly onStdout?: (chunk: string) => void;
 }
 
 /**
@@ -41,13 +43,19 @@ export interface CommandRunOptions {
 export type CommandRunner = (command: string, args: readonly string[], options?: CommandRunOptions) => Promise<CommandResult>;
 
 export const runCommand: CommandRunner = async (command, args, options = {}) => {
-  const result = await execa(command, args, {
+  const subprocess = execa(command, args, {
     reject: false,
     stripFinalNewline: false,
     maxBuffer: 64 * 1024 * 1024,
     ...(options.signal ? { cancelSignal: options.signal } : {}),
     ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
   });
+  if (options.onStdout) {
+    const onStdout = options.onStdout;
+    subprocess.stdout.setEncoding("utf8");
+    subprocess.stdout.on("data", (chunk: string) => onStdout(chunk));
+  }
+  const result = await subprocess;
   // Spawn-level failure (e.g. binary not found), cancellation or timeout, not a non-zero exit.
   if (result.exitCode === undefined) throw result;
   return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };

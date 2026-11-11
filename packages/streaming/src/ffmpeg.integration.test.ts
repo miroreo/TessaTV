@@ -2,10 +2,12 @@
 // the arguments this package builds are proven to be accepted by ffmpeg — not just shaped
 // the way the unit tests expect. Skips when ffmpeg isn't on PATH. The VAAPI case also
 // skips unless the render node exists and detection finds a working encoder.
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { checkFileHealth } from "./file-health.js";
 import { detectVaapiCapabilities } from "./hardware-accel/detect.js";
 import type { HardwareAccel } from "./hardware-accel/hardware-accel.js";
 import { SoftwareAccel } from "./hardware-accel/software.js";
@@ -52,6 +54,20 @@ describe.skipIf(!ffmpegAvailable)("streaming against real ffmpeg", () => {
     expect(probe.durationSeconds).toBeCloseTo(4, 0);
     expect(probe.videoStreams[0]).toMatchObject({ codec: "hevc", bitDepth: 10, width: 640, height: 360 });
     expect(probe.audioStreams[0]).toMatchObject({ codec: "ac3", channels: 6 });
+  });
+
+  it("decode-checks a clean file, reporting progress, and flags one with a corrupted stretch", async () => {
+    const positions: number[] = [];
+    const clean = await checkFileHealth(samplePath, { readRate: 100, onProgress: ({ outTimeSeconds }) => positions.push(outTimeSeconds) });
+    expect(clean).toBeNull();
+    expect(positions.length).toBeGreaterThan(0);
+    expect(Math.max(...positions)).toBeCloseTo(4, 0);
+
+    const bytes = await readFile(samplePath);
+    const damagedPath = join(root, "damaged.mkv");
+    randomBytes(4000).copy(bytes, Math.floor(bytes.length / 2));
+    await writeFile(damagedPath, bytes);
+    expect(await checkFileHealth(damagedPath, { readRate: 100 })).toEqual(expect.any(String));
   });
 
   it("remuxes into fMP4 HLS without re-encoding video", async () => {

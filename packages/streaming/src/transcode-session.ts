@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { access, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { buildTranscodeArgs, PLAYLIST_FILENAME, type HlsOutputOptions } from "./ffmpeg-args.js";
+import { FfmpegProgressParser } from "./ffmpeg-progress.js";
 import type { HardwareAccel } from "./hardware-accel/hardware-accel.js";
 import type { PlaybackPlan } from "./playback-plan.js";
 import { spawnProcess, type ProcessSpawner, type SpawnedProcess } from "./process.js";
@@ -51,8 +52,12 @@ export class TranscodeSession {
     private readonly killTimeoutMs: number,
   ) {
     this.playlistPath = join(outputDirectory, PLAYLIST_FILENAME);
+    const progress = new FfmpegProgressParser(({ outTimeSeconds, speed }) => {
+      this.latestProgress = { outTimeSeconds, speed };
+      for (const listener of this.progressListeners) listener(this.latestProgress);
+    });
     this.process.stdout?.setEncoding("utf8");
-    this.process.stdout?.on("data", (chunk: string) => this.consumeProgress(chunk));
+    this.process.stdout?.on("data", (chunk: string) => progress.push(chunk));
     this.process.stderr?.setEncoding("utf8");
     this.process.stderr?.on("data", (chunk: string) => {
       this.stderrTail = (this.stderrTail + chunk).slice(-STDERR_TAIL_BYTES);
@@ -133,37 +138,6 @@ export class TranscodeSession {
       await this.done;
     }
     await rm(this.outputDirectory, { recursive: true, force: true });
-  }
-
-  private progressBuffer = "";
-  private pendingProgress: { outTimeSeconds?: number; speed?: number | null } = {};
-
-  /** Parses ffmpeg's `-progress` key=value blocks, each terminated by a `progress=` line. */
-  private consumeProgress(chunk: string) {
-    this.progressBuffer += chunk;
-    const lines = this.progressBuffer.split("\n");
-    this.progressBuffer = lines.pop() ?? "";
-    for (const line of lines) {
-      const separator = line.indexOf("=");
-      if (separator < 0) continue;
-      const key = line.slice(0, separator).trim();
-      const value = line.slice(separator + 1).trim();
-      if (key === "out_time_us" || key === "out_time_ms") {
-        // Both keys are microseconds (`out_time_ms` is a long-standing ffmpeg misnomer).
-        const micros = Number(value);
-        if (Number.isFinite(micros)) this.pendingProgress.outTimeSeconds = micros / 1_000_000;
-      } else if (key === "speed") {
-        const speed = Number.parseFloat(value);
-        this.pendingProgress.speed = Number.isFinite(speed) ? speed : null;
-      } else if (key === "progress") {
-        this.latestProgress = {
-          outTimeSeconds: this.pendingProgress.outTimeSeconds ?? this.latestProgress.outTimeSeconds,
-          speed: this.pendingProgress.speed !== undefined ? this.pendingProgress.speed : this.latestProgress.speed,
-        };
-        this.pendingProgress = {};
-        for (const listener of this.progressListeners) listener(this.latestProgress);
-      }
-    }
   }
 }
 
