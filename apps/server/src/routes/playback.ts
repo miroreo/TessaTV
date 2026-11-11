@@ -3,6 +3,7 @@ import send from "@fastify/send";
 import {
   isCompletedPosition,
   isPlayable,
+  type FileHealthRepository,
   type LibraryRepository,
   type LoudnessRepository,
   normalizationGainDb,
@@ -44,6 +45,8 @@ export interface PlaybackDependencies {
   readonly settings?: ServerSettingsRepository;
   /** Optional so a deployment without the scan job simply plays unlevelled audio. */
   readonly loudnessRepository?: LoudnessRepository;
+  /** Optional: without it every file is trusted, as before the decode check existed. */
+  readonly fileHealthRepository?: FileHealthRepository;
   /** Test seams. */
   readonly probe?: (path: string) => Promise<MediaProbe>;
   readonly extractSubtitles?: (path: string, streamIndex: number) => Promise<string>;
@@ -129,6 +132,9 @@ const fallbackLevel = z
   .min(0)
   .max(MAX_FALLBACK_LEVEL)
   .transform((level) => level as FallbackLevel);
+
+/** CPU-only and told to push through corrupt input: see `FallbackLevel`. */
+const DAMAGED_FILE_FALLBACK_LEVEL = 2;
 
 /** Only what ffmpeg's HLS muxer writes — never a path. */
 const HLS_FILE = /^[\w-]+\.(m3u8|m4s|ts|mp4)$/;
@@ -304,6 +310,9 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       const media = await probeOr404(playable.file, reply);
       if (!media) return reply;
       const maxHeight = (await deps.settings?.get())?.maxStreamHeight ?? undefined;
+      // A file the background check found damaged starts on the CPU-only, error-tolerant level.
+      const damaged = (await deps.fileHealthRepository?.get(playable.file.id))?.error != null;
+      const startLevel = Math.max(request.body.fallbackLevel ?? 0, damaged ? DAMAGED_FILE_FALLBACK_LEVEL : 0) as FallbackLevel;
       try {
         return await startStream(
           playable.unit.id,
@@ -315,7 +324,7 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
             ...(subtitleStreamIndex !== undefined ? { subtitleStreamIndex } : {}),
             ...(maxHeight !== undefined ? { maxHeight } : {}),
           },
-          request.body.fallbackLevel ?? 0,
+          startLevel,
         );
       } catch (error) {
         if (error instanceof TranscodeCapacityError) return reply.code(503).send({ error: "busy", message: error.message });
@@ -354,12 +363,19 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       if (!playable) return reply.code(404).send({ error: "not_found" });
       const media = await probeOr404(playable.file, reply);
       if (!media) return reply;
+      const health = await deps.fileHealthRepository?.get(playable.file.id);
       const transcode = request.query.transcodeId ? transcodes.inspect(request.query.transcodeId) : null;
       const sourceVideo = transcode?.plan.video?.kind === "transcode" ? transcode.plan.video.source : media.videoStreams[0];
       const audioIndex = transcode?.plan.audio?.streamIndex;
       const sourceAudio = media.audioStreams.find((stream) => stream.index === audioIndex) ?? media.audioStreams[0];
       const response: PlaybackStatsResponse = {
-        file: { path: media.path, container: media.container, sizeBytes: media.sizeBytes, bitRate: media.bitRate },
+        file: {
+          path: media.path,
+          container: media.container,
+          sizeBytes: media.sizeBytes,
+          bitRate: media.bitRate,
+          health: health ? { checkedAt: health.checkedAt.toISOString(), error: health.error } : null,
+        },
         sourceVideo: sourceVideo
           ? {
               codec: sourceVideo.codec,

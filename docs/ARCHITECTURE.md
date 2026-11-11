@@ -568,6 +568,18 @@ clicked yet (a new tab, a reload, the full reload SvelteKit does after a rebuild
 Gecko forks require a click per play; `play()` then rejects with `NotAllowedError`. The
 player shows a large play button in that case rather than sitting silently paused.
 
+**File health check** (`FileHealthMonitor`, `packages/streaming/src/file-health.ts`): a
+background loop decodes every media file end to end on the CPU — `nice -n 19`, one thread,
+`-readrate 4` — and records the result in `file_health` (migration 0015). `-xerror` makes a
+decode error exit non-zero, and only that counts as damage: plain warnings (odd timestamps)
+are common on healthy files. Order: never-checked files (newest import first), files whose
+size changed, then each file again after 90 days. It waits while any transcode is running,
+and skips a file it can't run on (missing, ffmpeg absent) until the next restart. It is a
+loop rather than a pg-boss job because one check of a long film outlasts a job's 15-minute
+expiry. `POST .../start` begins a damaged file at fallback level 2 (CPU-only, error-tolerant,
+so no direct play), and the stats for nerds show the result. Not a guarantee: a file that
+decodes cleanly on the CPU can still upset a GPU decoder, which is why GPU decode is opt-in.
+
 **Volume normalization** (on by default, toggle in the player, remembered per browser):
 the `loudness-scan` job (pg-boss, every 15 min, ≤10 min per run so it fits pg-boss's job
 expiry) measures each file's default audio stream with ffmpeg's `ebur128` filter (EBU R128 /

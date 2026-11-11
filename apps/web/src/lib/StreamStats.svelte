@@ -128,6 +128,14 @@
         ["File", `${server.file.path}`],
         ["Container / Size / Bitrate", `${server.file.container} / ${bytes(server.file.sizeBytes)} / ${megabits(server.file.bitRate)}`],
         [
+          "Decode check",
+          server.file.health
+            ? server.file.health.error
+              ? `damaged: ${server.file.health.error}`
+              : `clean (checked ${new Date(server.file.health.checkedAt).toLocaleDateString()})`
+            : "not checked yet",
+        ],
+        [
           "Source video",
           source
             ? `${source.codec}${source.profile ? ` (${source.profile})` : ""} ${source.width}×${source.height} ${source.bitDepth}-bit${source.frameRate ? ` ${source.frameRate.toFixed(3)} fps` : ""}${source.isHdr ? " HDR" : ""}`

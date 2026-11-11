@@ -171,6 +171,8 @@ export interface PlaybackStatsResponse {
     readonly container: string;
     readonly sizeBytes: number | null;
     readonly bitRate: number | null;
+    /** The background decode check; null until the file has been checked. */
+    readonly health: { readonly checkedAt: string; readonly error: string | null } | null;
   };
   readonly sourceVideo: {
     readonly codec: string;

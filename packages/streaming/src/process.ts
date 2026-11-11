@@ -27,12 +27,28 @@ export interface CommandResult {
   readonly stderr: string;
 }
 
-/** Runs a short-lived command to completion. Never throws on a non-zero exit — callers decide. */
-export type CommandRunner = (command: string, args: readonly string[]) => Promise<CommandResult>;
+export interface CommandRunOptions {
+  /** Kills the command when aborted. */
+  readonly signal?: AbortSignal;
+  /** Kills the command after this long. */
+  readonly timeoutMs?: number;
+}
 
-export const runCommand: CommandRunner = async (command, args) => {
-  const result = await execa(command, args, { reject: false, stripFinalNewline: false, maxBuffer: 64 * 1024 * 1024 });
-  // Spawn-level failure (e.g. binary not found), not a non-zero exit.
+/**
+ * Runs a command to completion. Never throws on a non-zero exit — callers decide — but does
+ * throw when the command couldn't run to an exit at all (missing binary, aborted, timed out).
+ */
+export type CommandRunner = (command: string, args: readonly string[], options?: CommandRunOptions) => Promise<CommandResult>;
+
+export const runCommand: CommandRunner = async (command, args, options = {}) => {
+  const result = await execa(command, args, {
+    reject: false,
+    stripFinalNewline: false,
+    maxBuffer: 64 * 1024 * 1024,
+    ...(options.signal ? { cancelSignal: options.signal } : {}),
+    ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
+  });
+  // Spawn-level failure (e.g. binary not found), cancellation or timeout, not a non-zero exit.
   if (result.exitCode === undefined) throw result;
   return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 };

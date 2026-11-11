@@ -1,5 +1,6 @@
 import type { AuthService } from "@tessatv/auth";
 import type {
+  FileHealthRepository,
   LibraryRepository,
   LoudnessRepository,
   MediaAvailabilityRepository,
@@ -46,6 +47,7 @@ export interface AppDependencies {
     metadataCache: MetadataCacheRepository | null;
     transcodes: TranscodeManager;
     loudnessRepository?: LoudnessRepository;
+    fileHealthRepository?: FileHealthRepository;
     /** Hides titles whose files have all gone missing. Without it, every title shows. */
     availability?: MediaAvailabilityRepository;
     probe?: PlaybackDependencies["probe"];
