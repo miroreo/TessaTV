@@ -1,5 +1,5 @@
 import type { LibraryRepository, MediaTypeId } from "@tessatv/domain";
-import { autoIdentifyLibrary, type MetadataProvidersByKind } from "@tessatv/library";
+import { autoIdentifyLibrary, type MetadataProvidersByKind, normalizeSeriesTitle, parseTitleAndYear } from "@tessatv/library";
 import { type MetadataMediaKind, type MetadataProvider, toMetadataMediaKind } from "@tessatv/metadata";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -47,7 +47,12 @@ export function registerLibraryMetadataRoutes(
     {
       schema: {
         params: idParams,
-        querystring: z.object({ year: z.coerce.number().int().optional(), provider: providerField }),
+        querystring: z.object({
+          year: z.coerce.number().int().optional(),
+          provider: providerField,
+          /** Free-text search, for when the folder name itself is a poor guess. */
+          query: z.string().trim().min(1).optional(),
+        }),
       },
     },
     async (request, reply) => {
@@ -67,9 +72,13 @@ export function registerLibraryMetadataRoutes(
         return DISABLED_RESPONSE;
       }
 
-      const year = request.query.year ?? null;
-      const candidates = await provider.search({ title: node.title, year, mediaKind });
-      return { provider: provider.id, items: candidates };
+      // Searched by what the folder was called, not `node.title`: after a wrong match that is
+      // already the wrong provider's canonical name, and re-searching it would find it again.
+      const typed = request.query.query;
+      const title = typed ?? normalizeSeriesTitle(node.sourceKey);
+      const year = request.query.year ?? (typed ? null : parseTitleAndYear(node.sourceKey).year);
+      const candidates = await provider.search({ title, year, mediaKind });
+      return { provider: provider.id, source: node.sourceKey, query: title, items: candidates };
     },
   );
 

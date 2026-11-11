@@ -3,6 +3,7 @@
   import { invalidateAll } from "$app/navigation";
   import { episodeCode, formatTime, progressFraction } from "$lib/api.js";
   import Icon from "$lib/Icon.svelte";
+  import IdentifyDialog from "$lib/IdentifyDialog.svelte";
   import { forgetPosition, setWatched } from "$lib/watched.js";
   import WatchedMenu from "$lib/WatchedMenu.svelte";
   import type { PageData } from "./$types.js";
@@ -23,6 +24,7 @@
     seasonUnits.every((episode) => episode.progress?.watched) ? true : seasonUnits.some((episode) => episode.progress?.watched) ? null : false,
   );
   let actionError = $state<string | null>(null);
+  let identifyDialog: IdentifyDialog;
 
   const canForget = (unit: UnitSummary) => !!unit.progress && !unit.progress.completed && unit.progress.positionSeconds > 0;
 
@@ -53,6 +55,8 @@
   <title>{title.title} · TessaTV</title>
 </svelte:head>
 
+<IdentifyDialog bind:this={identifyDialog} nodeId={title.id} oncomplete={invalidateAll} />
+
 <div
   class="hero rounded-box -mx-4 -mt-4 mb-6 bg-cover bg-center"
   style:background-image={title.backdropUrl ? `url("${title.backdropUrl}")` : "none"}
@@ -78,6 +82,11 @@
             canForget={canForget(movie)}
             onpick={(action) => apply([movie], action)}
           />
+        {/if}
+        {#if data.session.user?.isAdmin}
+          <button type="button" class="btn btn-ghost btn-sm" onclick={() => identifyDialog.open()}>
+            <Icon name="search" class="size-4" /> Fix match
+          </button>
         {/if}
       </div>
       {#if actionError}<div class="alert alert-error mt-3">{actionError}</div>{/if}

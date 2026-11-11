@@ -341,6 +341,13 @@ top-level series) — seasons/episodes aren't independently searchable. All thre
 plus auto-identify below, return `503` for a media kind with no provider configured
 (missing `TMDB_API_KEY`/`TVDB_API_KEY`), rather than crashing the app.
 
+The candidates route searches by the node's `sourceKey` (folder name, with its `(Year)`),
+**not** `title`: after a wrong identify `title` is already the wrong match's canonical name, so
+searching it would just find the same wrong answer. `?query=` overrides with typed text, and
+the response carries `source` (the folder name) and `query`. The UI's "Fix match" button on a
+title page (admins only; `IdentifyDialog.svelte`) lists those candidates with poster, title,
+year and overview beside the scanned folder name, and applies the pick via `identify`.
+
 `POST /api/library/auto-identify` (`autoIdentifyLibrary` in `packages/library`) sweeps
 every root node, picks the right provider for its media kind, and auto-applies the top
 search candidate — the "auto" policy built on the same primitives as the manual flow.

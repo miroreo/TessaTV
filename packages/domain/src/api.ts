@@ -52,6 +52,22 @@ export interface UnitsResponse {
   readonly items: readonly Unit[];
 }
 
+/** `GET /api/library/:id/metadata/candidates` */
+export interface IdentifyCandidatesResponse {
+  readonly provider: string;
+  /** The scanned folder name the title came from, so the user can tell what they're matching. */
+  readonly source: string;
+  /** What was actually searched for. */
+  readonly query: string;
+  readonly items: readonly {
+    readonly externalId: string;
+    readonly title: string;
+    readonly year: number | null;
+    readonly overview: string | null;
+    readonly posterUrl: string | null;
+  }[];
+}
+
 /** A movie or series as the UI shows it: library data plus whatever artwork identify cached. */
 export interface TitleSummary {
   readonly id: string;
