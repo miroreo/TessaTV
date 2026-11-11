@@ -22,10 +22,19 @@ const ENCODERS: Record<TranscodeVideoCodec, readonly string[]> = {
   av1: ["-c:v", "av1_vaapi"],
 };
 
+export interface VaapiOptions {
+  /**
+   * Decode on the GPU when it supports the source. Off by default: corrupt input can hang the
+   * GPU's decoder (an AMD UVD ring timeout whose reset failed froze the whole machine), while
+   * the CPU decoder just reports an error. Encoding stays on the GPU either way.
+   */
+  readonly hardwareDecode?: boolean;
+}
+
 /**
- * VAAPI encode, with hardware decode when the GPU supports the source codec + bit depth and
- * software decode + `hwupload` otherwise (e.g. XviD on most GPUs). Target codecs the GPU
- * can't encode are delegated to the fallback strategy wholesale.
+ * VAAPI encode, with software decode + `hwupload` by default, or hardware decode when
+ * enabled and the GPU supports the source codec + bit depth. Target codecs the GPU can't
+ * encode are delegated to the fallback strategy wholesale.
  */
 export class VaapiAccel implements HardwareAccel {
   readonly kind = "vaapi";
@@ -37,6 +46,7 @@ export class VaapiAccel implements HardwareAccel {
   constructor(
     readonly capabilities: VaapiCapabilities,
     private readonly fallback: HardwareAccel,
+    private readonly options: VaapiOptions = {},
   ) {}
 
   canDecode(codec: string, bitDepth: number): boolean {
@@ -47,7 +57,7 @@ export class VaapiAccel implements HardwareAccel {
     if (!this.capabilities.encode.includes(request.codec)) return this.fallback.videoPipeline(request);
 
     const { source } = request;
-    const hardwareDecode = this.canDecode(source.codec, source.bitDepth);
+    const hardwareDecode = this.options.hardwareDecode === true && this.canDecode(source.codec, source.bitDepth);
     return {
       inputArgs: [
         "-init_hw_device",

@@ -46,8 +46,18 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...validEnv, APP_SECRET: "" })).toThrow(/APP_SECRET/);
   });
 
+  it("keeps memory diagnostics off unless a directory is given, capturing at 1 GB by default", () => {
+    expect(loadConfig(validEnv).DIAGNOSTICS_DIR).toBeUndefined();
+    expect(loadConfig(validEnv).DIAGNOSTICS_CAPTURE_AT_MB).toBe(1024);
+    const on = loadConfig({ ...validEnv, DIAGNOSTICS_DIR: "/diag", DIAGNOSTICS_CAPTURE_AT_MB: "512" });
+    expect(on).toMatchObject({ DIAGNOSTICS_DIR: "/diag", DIAGNOSTICS_CAPTURE_AT_MB: 512 });
+    expect(loadConfig({ ...validEnv, DIAGNOSTICS_DIR: "" }).DIAGNOSTICS_DIR).toBeUndefined();
+    expect(() => loadConfig({ ...validEnv, DIAGNOSTICS_CAPTURE_AT_MB: "0" })).toThrow(/DIAGNOSTICS_CAPTURE_AT_MB/);
+  });
+
   it("defaults transcoding settings, and rejects an unknown hardware accel mode", () => {
-    expect(loadConfig(validEnv)).toMatchObject({ HARDWARE_ACCEL: "auto", MAX_CONCURRENT_TRANSCODES: 3 });
+    expect(loadConfig(validEnv)).toMatchObject({ HARDWARE_ACCEL: "auto", MAX_CONCURRENT_TRANSCODES: 3, VAAPI_HARDWARE_DECODE: false });
+    expect(loadConfig({ ...validEnv, VAAPI_HARDWARE_DECODE: "true" }).VAAPI_HARDWARE_DECODE).toBe(true);
     expect(loadConfig(validEnv).TRANSCODE_DIR).toMatch(/tessatv-transcodes$/);
     expect(() => loadConfig({ ...validEnv, HARDWARE_ACCEL: "nvenc" })).toThrow(/HARDWARE_ACCEL/);
   });

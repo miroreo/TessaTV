@@ -5,6 +5,7 @@ export { DrizzleQualityRepository } from "./quality-repository.js";
 export { runMigrations } from "./migrate.js";
 export { DrizzleLibraryFolderRepository, DrizzleMediaAvailabilityRepository } from "./library-scan-repositories.js";
 export { DrizzleLoudnessRepository } from "./loudness-repository.js";
+export { DrizzleFileHealthRepository } from "./file-health-repository.js";
 export { DrizzleWatchProgressRepository } from "./watch-progress-repository.js";
 export { DrizzleAuthSessionRepository, DrizzleUserRepository } from "./user-repository.js";
 export * as schema from "./schema.js";

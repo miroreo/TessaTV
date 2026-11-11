@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     MAX_STREAM_HEIGHTS,
+    type FileHealthStatusResponse,
     type JellyfinImportResponse,
     type LibraryFolderSummary,
     type LibraryScanStatus,
@@ -64,6 +65,53 @@
       if (liveScan.running) watchScan();
       else await invalidateAll();
     }, 1500);
+  }
+
+  /** The background decode check: refreshed here every few seconds while the page is open. */
+  let liveHealth = $state<FileHealthStatusResponse | null>(null);
+  const health = $derived(liveHealth ?? data.fileHealth);
+  let savingHealth = $state(false);
+  let healthError = $state<string | null>(null);
+  // Quicker while a file is being decoded, so its progress moves.
+  const healthPollMs = $derived(health.current ? 3_000 : 10_000);
+  $effect(() => {
+    const timer = setInterval(async () => {
+      try {
+        liveHealth = await api<FileHealthStatusResponse>(fetch, "/api/file-health");
+      } catch {
+        // A missed refresh just shows the previous numbers.
+      }
+    }, healthPollMs);
+    return () => clearInterval(timer);
+  });
+
+  function clock(seconds: number): string {
+    const whole = Math.max(0, Math.floor(seconds));
+    const [h, m, s] = [Math.floor(whole / 3600), Math.floor((whole % 3600) / 60), whole % 60];
+    return `${h > 0 ? `${h}:${String(m).padStart(2, "0")}` : m}:${String(s).padStart(2, "0")}`;
+  }
+  const healthPercent = $derived(
+    health.current?.durationSeconds ? Math.min(100, (health.current.positionSeconds / health.current.durationSeconds) * 100) : null,
+  );
+
+  const HEALTH_STATE_LABEL: Record<FileHealthStatusResponse["state"], string> = {
+    disabled: "Off",
+    waiting: "Paused while a video is transcoding",
+    checking: "Checking",
+    idle: "Everything is checked",
+  };
+
+  async function setFileHealth(change: { fileHealthCheck: boolean } | { fileHealthFullSpeed: boolean }) {
+    savingHealth = true;
+    healthError = null;
+    try {
+      await api<ServerSettingsResponse>(fetch, "/api/settings", { method: "PATCH", body: JSON.stringify(change) });
+      liveHealth = await api<FileHealthStatusResponse>(fetch, "/api/file-health");
+    } catch (cause) {
+      healthError = (cause as Error).message;
+    } finally {
+      savingHealth = false;
+    }
   }
 
   let maxStreamHeight = $state<MaxStreamHeight | null>(null);
@@ -222,6 +270,87 @@
       starts.
     </p>
     {#if settingsError}<div class="alert alert-error">{settingsError}</div>{/if}
+  </div>
+</section>
+
+<section class="card bg-base-200 mb-6">
+  <div class="card-body">
+    <h2 class="card-title">File health check</h2>
+    <p class="text-sm opacity-70">
+      Slowly decodes every video file in the background, on the CPU at the lowest priority and only while nothing is transcoding,
+      to find damaged files before anyone plays them. A damaged file is always transcoded on the CPU, never played directly.
+      Each file is checked again every 90 days, or when it changes.
+    </p>
+    <label class="label cursor-pointer justify-start gap-3">
+      <input
+        type="checkbox"
+        class="toggle toggle-warning"
+        checked={health.enabled}
+        onchange={(event) => setFileHealth({ fileHealthCheck: event.currentTarget.checked })}
+        disabled={savingHealth}
+      />
+      <span class="text-base-content">Check files in the background</span>
+      {#if savingHealth}<span class="loading loading-spinner loading-sm"></span>{/if}
+    </label>
+    <label class="label cursor-pointer items-start justify-start gap-3">
+      <input
+        type="checkbox"
+        class="toggle toggle-warning mt-0.5"
+        checked={health.fullSpeed}
+        onchange={(event) => setFileHealth({ fileHealthFullSpeed: event.currentTarget.checked })}
+        disabled={savingHealth || !health.enabled}
+      />
+      <span class="text-base-content">
+        Full speed
+        <span class="block text-sm opacity-70">
+          Decodes as fast as the disk and every CPU core allow, and keeps going while videos transcode (still at the lowest
+          priority, so playback wins any tug of war). Meant for catching up on a library; it doesn't switch itself off, so turn it
+          back off afterwards. Takes effect straight away, restarting the file in progress.
+        </span>
+      </span>
+    </label>
+    {#if healthError}<div class="alert alert-error">{healthError}</div>{/if}
+    <div class="stats stats-vertical sm:stats-horizontal bg-base-100 w-full">
+      <div class="stat">
+        <div class="stat-title">Checked</div>
+        <div class="stat-value text-2xl">{health.clean + health.damaged} <span class="text-base font-normal opacity-70">of {health.total}</span></div>
+        <div class="stat-desc">{health.due} waiting</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Damaged</div>
+        <div class="stat-value text-2xl" class:text-error={health.damaged > 0}>{health.damaged}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Status</div>
+        <div class="stat-value text-lg">{HEALTH_STATE_LABEL[health.state]}</div>
+      </div>
+    </div>
+    {#if health.current}
+      <div class="bg-base-100 rounded-box space-y-2 p-4" aria-live="off">
+        <div class="font-mono text-sm break-all">{health.current.path}</div>
+        <progress class="progress progress-warning w-full" value={healthPercent ?? undefined} max="100"></progress>
+        <div class="flex flex-wrap gap-x-4 text-sm opacity-80">
+          <span>{healthPercent !== null ? `${healthPercent.toFixed(1)}%` : "length unknown"}</span>
+          <span>
+            {clock(health.current.positionSeconds)}{health.current.durationSeconds ? ` / ${clock(health.current.durationSeconds)}` : ""}
+          </span>
+          {#if health.current.fps !== null}<span>{health.current.fps.toFixed(0)} fps</span>{/if}
+          {#if health.current.speed !== null}<span>{health.current.speed.toFixed(1)}× realtime</span>{/if}
+        </div>
+      </div>
+    {/if}
+    {#if health.damagedFiles.length > 0}
+      <h3 class="mt-2 font-semibold">Damaged files</h3>
+      <ul class="divide-base-300 divide-y text-sm">
+        {#each health.damagedFiles as file (file.path)}
+          <li class="py-2">
+            <div class="font-mono break-all">{file.path}</div>
+            <div class="text-error break-words opacity-90">{file.error}</div>
+            <div class="text-xs opacity-60">checked {new Date(file.checkedAt).toLocaleString()}</div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </div>
 </section>
 

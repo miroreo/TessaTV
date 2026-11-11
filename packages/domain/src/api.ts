@@ -171,6 +171,8 @@ export interface PlaybackStatsResponse {
     readonly container: string;
     readonly sizeBytes: number | null;
     readonly bitRate: number | null;
+    /** The background decode check; null until the file has been checked. */
+    readonly health: { readonly checkedAt: string; readonly error: string | null } | null;
   };
   readonly sourceVideo: {
     readonly codec: string;
@@ -261,6 +263,32 @@ export interface ServerSettingsResponse {
     readonly buttonLabel: string;
   } | null;
   readonly jellyfin: { readonly url: string; readonly hasApiKey: boolean } | null;
+  readonly fileHealthCheck: boolean;
+  readonly fileHealthFullSpeed: boolean;
+}
+
+/** `GET /api/file-health` (admins only): the background decode check, for the settings page. */
+export interface FileHealthStatusResponse {
+  readonly enabled: boolean;
+  /** Whether the check is running unthrottled; see `ServerSettings.fileHealthFullSpeed`. */
+  readonly fullSpeed: boolean;
+  /** `waiting` while a transcode is running; `idle` when there's nothing left to check. */
+  readonly state: "disabled" | "waiting" | "checking" | "idle";
+  /** The file being decoded right now. Position and fps update about twice a second. */
+  readonly current: {
+    readonly path: string;
+    readonly startedAt: string;
+    /** Null when the file's length couldn't be read. */
+    readonly durationSeconds: number | null;
+    readonly positionSeconds: number;
+    readonly fps: number | null;
+    readonly speed: number | null;
+  } | null;
+  readonly total: number;
+  readonly clean: number;
+  readonly damaged: number;
+  readonly due: number;
+  readonly damagedFiles: readonly { readonly path: string; readonly error: string; readonly checkedAt: string }[];
 }
 
 /** `PATCH /api/settings`'s `jellyfin`. Omitting `apiKey` keeps the saved one. */

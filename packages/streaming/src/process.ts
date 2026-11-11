@@ -27,12 +27,45 @@ export interface CommandResult {
   readonly stderr: string;
 }
 
-/** Runs a short-lived command to completion. Never throws on a non-zero exit — callers decide. */
-export type CommandRunner = (command: string, args: readonly string[]) => Promise<CommandResult>;
+export interface CommandRunOptions {
+  /** Kills the command when aborted. */
+  readonly signal?: AbortSignal;
+  /** Kills the command after this long. */
+  readonly timeoutMs?: number;
+  /** Called with stdout as it arrives, for live progress. stdout is then not kept: the result's `stdout` is empty. */
+  readonly onStdout?: (chunk: string) => void;
+}
 
-export const runCommand: CommandRunner = async (command, args) => {
-  const result = await execa(command, args, { reject: false, stripFinalNewline: false, maxBuffer: 64 * 1024 * 1024 });
-  // Spawn-level failure (e.g. binary not found), not a non-zero exit.
+/**
+ * Runs a command to completion. Never throws on a non-zero exit — callers decide — but does
+ * throw when the command couldn't run to an exit at all (missing binary, aborted, timed out).
+ */
+export type CommandRunner = (command: string, args: readonly string[], options?: CommandRunOptions) => Promise<CommandResult>;
+
+/** More stderr than this is cut off (and ffmpeg stopped), so a badly damaged file can't fill memory with errors. */
+const MAX_STDERR_CHARS = 4 * 1024 * 1024;
+
+export const runCommand: CommandRunner = async (command, args, options = {}) => {
+  const subprocess = execa(command, args, {
+    reject: false,
+    stripFinalNewline: false,
+    maxBuffer: { stdout: 64 * 1024 * 1024, stderr: MAX_STDERR_CHARS },
+    // Streamed output is consumed by the listener; keeping a second copy only grows with run length.
+    ...(options.onStdout ? { buffer: { stdout: false } } : {}),
+    ...(options.signal ? { cancelSignal: options.signal } : {}),
+    ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
+  });
+  if (options.onStdout) {
+    const onStdout = options.onStdout;
+    subprocess.stdout.setEncoding("utf8");
+    subprocess.stdout.on("data", (chunk: string) => onStdout(chunk));
+  }
+  const result = await subprocess;
+  // Flooded stderr: the process was stopped, but what it printed so far is the answer.
+  if (result.isMaxBuffer && result.exitCode === undefined && result.stderr.length >= MAX_STDERR_CHARS) {
+    return { exitCode: 1, stdout: result.stdout ?? "", stderr: result.stderr };
+  }
+  // Spawn-level failure (e.g. binary not found), cancellation or timeout, not a non-zero exit.
   if (result.exitCode === undefined) throw result;
-  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+  return { exitCode: result.exitCode, stdout: result.stdout ?? "", stderr: result.stderr };
 };

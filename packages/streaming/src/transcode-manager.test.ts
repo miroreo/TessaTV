@@ -107,6 +107,15 @@ describe("TranscodeManager", () => {
     expect(new Set(directories).size).toBe(2);
   });
 
+  it("drops the transcode when a seek's restart fails, instead of keeping a disposed session", async () => {
+    const transcodes = manager();
+    const { id } = await transcodes.begin(PLAN, 100);
+    sessions[0]!.progress = { outTimeSeconds: 60, speed: 1 };
+    startSession.mockRejectedValueOnce(new Error("ffmpeg failed to start"));
+    await expect(transcodes.seek(id, 500)).rejects.toThrow("ffmpeg failed to start");
+    expect(transcodes.touch(id)).toBeNull();
+  });
+
   it("returns null for unknown ids", async () => {
     const transcodes = manager();
     expect(transcodes.touch("nope")).toBeNull();

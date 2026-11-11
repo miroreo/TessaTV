@@ -12,6 +12,7 @@ import {
   DrizzleMetadataCacheRepository,
   DrizzleUserRepository,
   DrizzleLibraryFolderRepository,
+  DrizzleFileHealthRepository,
   DrizzleLoudnessRepository,
   DrizzleMediaAvailabilityRepository,
   DrizzleServerSettingsRepository,
@@ -19,9 +20,10 @@ import {
   DrizzleWatchProgressRepository,
   runMigrations,
 } from "@tessatv/persistence";
-import { measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
+import { FileHealthMonitor, measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
 import { createSubtitleSweep } from "./subtitle-job.js";
+import { MemoryDiagnostics } from "./diagnostics.js";
 import { LibraryScanner } from "./library-scanner.js";
 import { loadWebUiHandler } from "./routes/web-ui.js";
 
@@ -34,6 +36,7 @@ await runMigrations(db);
 const libraryRepository = new DrizzleLibraryRepository(db);
 const metadataCacheRepository = new DrizzleMetadataCacheRepository(db);
 const loudnessRepository = new DrizzleLoudnessRepository(db);
+const fileHealthRepository = new DrizzleFileHealthRepository(db);
 const users = new DrizzleUserRepository(db);
 const auth = new AuthService(users, new DrizzleAuthSessionRepository(db));
 const serverSettings = new DrizzleServerSettingsRepository(db);
@@ -57,6 +60,7 @@ const metadataProviders: MetadataProvidersByKind = {
 // Resolved up front so a misconfigured explicit `vaapi` stops startup, not the first playback.
 const hardwareAccel = await selectHardwareAccel(config.HARDWARE_ACCEL, {
   ...(config.VAAPI_DEVICE ? { vaapiDevice: config.VAAPI_DEVICE } : {}),
+  vaapiHardwareDecode: config.VAAPI_HARDWARE_DECODE,
 });
 const transcodes = new TranscodeManager({
   directory: config.TRANSCODE_DIR,
@@ -67,6 +71,18 @@ const transcodes = new TranscodeManager({
 });
 
 const availability = new DrizzleMediaAvailabilityRepository(db);
+
+// Opt-in (DIAGNOSTICS_DIR): logs heap numbers, runs the sampling heap profiler, and writes a
+// profile + snapshot when the heap first reaches DIAGNOSTICS_CAPTURE_AT_MB — for finding a leak.
+const diagnostics = config.DIAGNOSTICS_DIR
+  ? new MemoryDiagnostics({
+      directory: config.DIAGNOSTICS_DIR,
+      captureAtMb: config.DIAGNOSTICS_CAPTURE_AT_MB,
+      onReport: (report) => app.log.info(report, "memory"),
+      onCapture: (files) => app.log.warn(files, "memory diagnostics captured a heap profile and snapshot"),
+      onError: (error) => app.log.error(error, "memory diagnostics capture failed"),
+    })
+  : null;
 const libraryFolders = new DrizzleLibraryFolderRepository(db);
 const scanner = new LibraryScanner({
   folders: libraryFolders,
@@ -88,9 +104,12 @@ const app = buildApp({
     metadataCache: metadataCacheRepository,
     transcodes,
     loudnessRepository,
+    fileHealthRepository,
     availability,
   },
   libraryFolders: { folders: libraryFolders, scanner },
+  fileHealth: { repository: fileHealthRepository, status: () => fileHealth.status() },
+  ...(diagnostics ? { diagnostics: { diagnostics } } : {}),
   settings: serverSettings,
   users,
   sso: {
@@ -164,6 +183,18 @@ if (subtitleSweep) {
     },
   });
 }
+// Decodes every file end to end on the CPU, slowly and only while no transcode is running, so
+// a damaged file is known before anyone plays it. Not a scheduled job: one check of a long
+// film outlasts a job's expiry.
+const fileHealth = new FileHealthMonitor({
+  repository: fileHealthRepository,
+  isEnabled: async () => (await serverSettings.get()).fileHealthCheck,
+  isFullSpeed: async () => (await serverSettings.get()).fileHealthFullSpeed,
+  isBusy: () => transcodes.runningCount > 0,
+  onChecked: (path, error) =>
+    error ? app.log.warn({ path, error }, "file failed its decode check") : app.log.debug({ path }, "file passed its decode check"),
+  onError: (path, error) => app.log.warn({ path, error: error.message }, "couldn't run the decode check"),
+});
 
 jobs.register({
   name: "metadata-refresh",
@@ -190,6 +221,12 @@ app
     app.log.info(`Transcoding with hardware accel: ${hardwareAccel.kind}`);
     await transcodes.start();
     await jobs.start();
+    fileHealth.start();
+    // A diagnostics failure (an unwritable directory, say) must not take the server down.
+    await diagnostics
+      ?.start()
+      .then(() => app.log.info({ directory: config.DIAGNOSTICS_DIR, captureAtMb: config.DIAGNOSTICS_CAPTURE_AT_MB }, "memory diagnostics on"))
+      .catch((error: Error) => app.log.error(error, "memory diagnostics couldn't start"));
   })
   .catch((error: unknown) => {
     app.log.error(error);
@@ -199,6 +236,6 @@ app
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     // Leaves no ffmpeg behind writing into a directory nothing will clean up until next boot.
-    void Promise.allSettled([transcodes.shutdown(), jobs.stop()]).finally(() => process.exit(0));
+    void Promise.allSettled([transcodes.shutdown(), jobs.stop(), fileHealth.stop(), diagnostics?.stop()]).finally(() => process.exit(0));
   });
 }

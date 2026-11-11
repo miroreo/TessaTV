@@ -12,6 +12,8 @@ export type HardwareAccelMode = "auto" | HardwareAccelKind;
 export interface HardwareAccelOptions {
   readonly ffmpegPath?: string;
   readonly vaapiDevice?: string;
+  /** Let VAAPI decode on the GPU too; see `VaapiOptions`. */
+  readonly vaapiHardwareDecode?: boolean;
   readonly runner?: CommandRunner;
 }
 
@@ -158,7 +160,7 @@ export async function selectHardwareAccel(
     () => false,
   );
   const capabilities = deviceExists ? await detectVaapiCapabilities({ ...options, vaapiDevice: device }) : null;
-  if (capabilities) return new VaapiAccel(capabilities, software);
+  if (capabilities) return new VaapiAccel(capabilities, software, { hardwareDecode: options.vaapiHardwareDecode === true });
   if (mode === "vaapi") {
     throw new Error(
       deviceExists

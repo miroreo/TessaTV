@@ -472,7 +472,13 @@ that transcode stays on the CPU for its later seeks. Remuxes are never retried: 
 use the accel, so the CPU would fail identically. Verified with real ffmpeg against a
 nonexistent render node: playable on the CPU 0.7s later.
 
-Config: `HARDWARE_ACCEL` (`auto`/`none`/`vaapi`), `VAAPI_DEVICE`, `TRANSCODE_DIR`,
+**GPU decode is opt-in.** VAAPI decodes on the CPU and only encodes on the GPU unless
+`VAAPI_HARDWARE_DECODE=true`. Found on the owner's server (AMD Polaris): ffmpeg hit corrupt
+data mid-file, the UVD decoder ring timed out, the driver's GPU reset failed, and the whole
+machine hung — the fallback ladder never got a chance, since nothing in Node was running.
+The CPU decoder just reports an error on the same data.
+
+Config: `HARDWARE_ACCEL` (`auto`/`none`/`vaapi`), `VAAPI_DEVICE`, `VAAPI_HARDWARE_DECODE`, `TRANSCODE_DIR`,
 `MAX_CONCURRENT_TRANSCODES`.
 
 Hardware accel is a `HardwareAccel` strategy whose only job is producing a `VideoPipeline`
@@ -577,6 +583,44 @@ breaking playback. Read on every start, so a change applies from the next video.
 clicked yet (a new tab, a reload, the full reload SvelteKit does after a rebuild), and some
 Gecko forks require a click per play; `play()` then rejects with `NotAllowedError`. The
 player shows a large play button in that case rather than sitting silently paused.
+
+**File health check** (`FileHealthMonitor`, `packages/streaming/src/file-health.ts`): a
+background loop decodes every media file end to end on the CPU — `nice -n 19`, one thread,
+`-readrate 4` — and records the result in `file_health` (migration 0015). Damage is a
+non-zero exit *or any output at `-v error`* (which hides warnings such as odd timestamps):
+ffmpeg exits 0 on plenty of real corruption — a HEVC stream with broken references, a
+Matroska element overrunning its parent — and only logs it. Found by corrupting a HEVC
+file: the exit code alone missed it, though H.264 in MP4 exited 183. Order: never-checked files (newest import first), files whose
+size changed, then each file again after 90 days. It waits while any transcode is running,
+and skips a file it can't run on (missing, ffmpeg absent) until the next restart. It is a
+loop rather than a pg-boss job because one check of a long film outlasts a job's 15-minute
+expiry. `POST .../start` begins a damaged file at fallback level 2 (CPU-only, error-tolerant,
+so no direct play), and the stats for nerds show the result. Not a guarantee: a file that
+decodes cleanly on the CPU can still upset a GPU decoder, which is why GPU decode is opt-in.
+
+It is a server setting, `fileHealthCheck` (admin Settings page → "File health check", on by
+default). The monitor reads it before every file and every 15s during one, so turning it off
+kills the check in progress at once; results stay stored but stop affecting playback while
+it's off, which is the way out of a false positive. The same card shows progress from
+`GET /api/file-health` (admin-only; refreshed every 10s while the page is open): files
+checked of total, how many are waiting, what's being decoded right now, and the damaged
+files with ffmpeg's first error. `waiting` means paused for a running transcode; `idle`,
+nothing left to check.
+
+**Full speed** (`fileHealthFullSpeed`, a second toggle on the same card; off by default)
+is for catching up on a big library: ffmpeg runs without `-readrate` and without the
+one-thread limit, and the monitor stops pausing for transcodes. It stays at `nice -n 19`,
+so playback still wins any contention for the CPU. It's read like the on/off setting, and
+a change restarts the file in progress so it takes effect immediately (the decode of that
+file starts over). It doesn't switch itself off.
+
+**Memory diagnostics** (`apps/server/src/diagnostics.ts`, opt-in via `DIAGNOSTICS_DIR`, how-to
+in `docs/DEPLOYMENT.md`): built on Node's own `v8` and `inspector` modules. A timer logs heap
+numbers; V8's sampling heap profiler stays on; and the first time the heap passes
+`DIAGNOSTICS_CAPTURE_AT_MB` a live-allocation profile and a full heap snapshot are written.
+It exists because a leak (~170 MB/min on the owner's server, from ~25 s after startup, no
+traffic needed) never reproduced locally or in a synthetic 9,000-episode library scan, so
+the evidence has to come out of the leaking process itself.
 
 **Volume normalization** (on by default, toggle in the player, remembered per browser):
 the `loudness-scan` job (pg-boss, every 15 min, ≤10 min per run so it fits pg-boss's job

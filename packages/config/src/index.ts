@@ -22,8 +22,14 @@ const envSchema = z.object({
   // `auto` falls back to software; an explicit `vaapi` that doesn't work fails startup.
   HARDWARE_ACCEL: z.enum(["auto", "none", "vaapi"]).default("auto"),
   VAAPI_DEVICE: z.string().min(1).optional(),
+  // Off by default: a corrupt file can hang the GPU's decoder and freeze the whole machine.
+  VAAPI_HARDWARE_DECODE: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   TRANSCODE_DIR: z.string().min(1).default(join(tmpdir(), "tessatv-transcodes")),
   MAX_CONCURRENT_TRANSCODES: z.coerce.number().int().positive().default(3),
+  // Memory diagnostics, for chasing a leak: off unless a directory is given. See docs/DEPLOYMENT.md.
+  DIAGNOSTICS_DIR: z.string().min(1).optional(),
+  // The first time the JS heap reaches this size, a heap profile and snapshot are written.
+  DIAGNOSTICS_CAPTURE_AT_MB: z.coerce.number().int().positive().default(1024),
 }).refine(
   (env) => [env.OPENSUBTITLES_API_KEY, env.OPENSUBTITLES_USERNAME, env.OPENSUBTITLES_PASSWORD].filter(Boolean).length % 3 === 0,
   { message: "OPENSUBTITLES_API_KEY, OPENSUBTITLES_USERNAME and OPENSUBTITLES_PASSWORD must be set together", path: ["OPENSUBTITLES_API_KEY"] },

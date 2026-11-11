@@ -39,7 +39,7 @@ describe("SoftwareAccel", () => {
 });
 
 describe("VaapiAccel", () => {
-  const accel = new VaapiAccel(CAPABILITIES, new SoftwareAccel());
+  const accel = new VaapiAccel(CAPABILITIES, new SoftwareAccel(), { hardwareDecode: true });
 
   it("decodes, scales, and encodes on the GPU when it supports the source", () => {
     const pipeline = accel.videoPipeline(request());
@@ -58,6 +58,14 @@ describe("VaapiAccel", () => {
     ]);
     expect(pipeline.filters).toEqual(["scale_vaapi=w=1280:h=720:format=nv12"]);
     expect(pipeline.encoderArgs.slice(0, 2)).toEqual(["-c:v", "h264_vaapi"]);
+  });
+
+  it("decodes on the CPU unless hardware decode is enabled, even for a supported source", () => {
+    const cpuDecode = new VaapiAccel(CAPABILITIES, new SoftwareAccel());
+    const pipeline = cpuDecode.videoPipeline(request());
+    expect(pipeline).toMatchObject({ decode: "software", encode: "hardware" });
+    expect(pipeline.inputArgs).not.toContain("-hwaccel");
+    expect(pipeline.filters).toEqual(["format=nv12", "hwupload", "scale_vaapi=w=1280:h=720:format=nv12"]);
   });
 
   it("matches decode support on codec and bit depth together", () => {
@@ -190,6 +198,7 @@ describe("HDR tone-mapping", () => {
     const vaapi = new VaapiAccel(
       { device: "/dev/dri/renderD128", encode: ["h264"], decode: [{ codec: "hevc", bitDepth: 10 }] },
       new SoftwareAccel(),
+      { hardwareDecode: true },
     );
     const pipeline = vaapi.videoPipeline(hdr);
     expect(pipeline.decode).toBe("hardware");

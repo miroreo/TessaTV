@@ -19,15 +19,26 @@ afterAll(async () => {
 
 describe("DrizzleServerSettingsRepository", () => {
   it("defaults, saves, and saves a cap back to none", async () => {
-    expect(await settings.get()).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null });
-    expect(await settings.update({ maxStreamHeight: 1080 })).toEqual({ maxStreamHeight: 1080, oidc: null, jellyfin: null });
-    expect(await settings.update({ maxStreamHeight: null })).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null });
-    expect(await settings.update({})).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null });
+    expect(await settings.get()).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false });
+    expect(await settings.update({ maxStreamHeight: 1080 })).toEqual({ maxStreamHeight: 1080, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false });
+    expect(await settings.update({ maxStreamHeight: null })).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false });
+    expect(await settings.update({})).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false });
+  });
+
+  it("saves the file health check on or off, and ignores a stored value that isn't a boolean", async () => {
+    expect((await settings.update({ fileHealthCheck: false })).fileHealthCheck).toBe(false);
+    expect((await settings.get()).fileHealthCheck).toBe(false);
+    expect((await settings.update({ fileHealthCheck: true })).fileHealthCheck).toBe(true);
+    expect((await settings.update({ fileHealthFullSpeed: true })).fileHealthFullSpeed).toBe(true);
+    expect((await settings.update({ fileHealthFullSpeed: false })).fileHealthFullSpeed).toBe(false);
+    await db.insert(serverSetting).values({ key: "fileHealthCheck", value: "yes" }).onConflictDoUpdate({ target: serverSetting.key, set: { value: "yes" } });
+    expect((await settings.get()).fileHealthCheck).toBe(true);
+    await db.delete(serverSetting);
   });
 
   it("ignores a stored value that's no longer allowed", async () => {
     await db.insert(serverSetting).values({ key: "maxStreamHeight", value: 999 }).onConflictDoUpdate({ target: serverSetting.key, set: { value: 999 } });
     await db.insert(serverSetting).values({ key: "retired", value: true });
-    expect(await settings.get()).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null });
+    expect(await settings.get()).toEqual({ maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false });
   });
 });
