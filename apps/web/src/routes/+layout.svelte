@@ -23,7 +23,7 @@
 
 {#if data.session.user && !chromeless}
   <header class="navbar bg-base-200 px-4">
-    <a href="/" class="flex-1 text-xl font-bold">TessaTV</a>
+    <a href="/" class="flex-1" aria-label="TessaTV"><img src="/logo.svg" alt="TessaTV" class="h-8 w-auto" /></a>
     <div class="flex items-center gap-2">
       {#if data.session.user.isAdmin}
         <a href="/settings" class="btn btn-ghost btn-sm" aria-label="Settings" title="Settings"><Icon name="settings" /></a>

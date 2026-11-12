@@ -1,5 +1,97 @@
 @import "tailwindcss";
-/* Dark only for now, matching the previous UI. */
+
+/* TessaTV design system: tokens come from the design system's tokens.json. */
+@font-face {
+  font-family: "Nunito";
+  src: url("/fonts/Nunito-400.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Nunito";
+  src: url("/fonts/Nunito-700.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: "Nunito", sans-serif;
+}
+
+/* Dark is the default, as before. Light is defined but not auto-selected yet. */
 @plugin "daisyui" {
-  themes: dark --default;
+  themes: false;
+}
+
+@plugin "daisyui/theme" {
+  name: "tessatv";
+  default: true;
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: #000000; /* surface-100 */
+  --color-base-200: #141214; /* surface-200 */
+  --color-base-300: #262228; /* not a design-system token: a step above surface-200 */
+  --color-base-content: #eed7f4; /* ink */
+  --color-primary: #00ccff; /* brand-cyan */
+  --color-primary-content: #000000; /* on-brand */
+  --color-secondary: #eed7f4; /* brand-lavender */
+  --color-secondary-content: #000000;
+  --color-accent: #00ccff; /* brand-cyan-text (dark) */
+  --color-accent-content: #000000;
+  --color-neutral: #141214;
+  --color-neutral-content: #eed7f4;
+  /* Status colors: the design system defines none yet (its README lists them as open). */
+  --color-info: #00ccff;
+  --color-info-content: #000000;
+  --color-success: #4ade80;
+  --color-success-content: #000000;
+  --color-warning: #fbbf24;
+  --color-warning-content: #000000;
+  --color-error: #f87171;
+  --color-error-content: #000000;
+  --radius-selector: 999px; /* radius-pill */
+  --radius-field: 8px; /* radius-md */
+  --radius-box: 16px; /* radius-lg */
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+  --focus-ring: #00ccff;
+}
+
+@plugin "daisyui/theme" {
+  name: "tessatv-light";
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #f8f1fc;
+  --color-base-300: #eed7f4; /* brand-lavender */
+  --color-base-content: #000000;
+  --color-primary: #00ccff;
+  --color-primary-content: #000000;
+  --color-secondary: #eed7f4;
+  --color-secondary-content: #000000;
+  --color-accent: #00728f; /* brand-cyan-text: cyan that passes contrast as text */
+  --color-accent-content: #ffffff;
+  --color-neutral: #000000;
+  --color-neutral-content: #eed7f4;
+  /* Status colors: the design system defines none yet. */
+  --color-info: #00728f;
+  --color-info-content: #ffffff;
+  --color-success: #15803d;
+  --color-success-content: #ffffff;
+  --color-warning: #b45309;
+  --color-warning-content: #ffffff;
+  --color-error: #b91c1c;
+  --color-error-content: #ffffff;
+  --radius-selector: 999px;
+  --radius-field: 8px;
+  --radius-box: 16px;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+  --focus-ring: #00728f;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }

@@ -32,7 +32,7 @@
         <span class="p-2 text-center text-sm opacity-60">{title}</span>
       {/if}
       {#if progress > 0}
-        <progress class="progress progress-warning absolute inset-x-0 bottom-0 h-1 rounded-none" value={progress} max="1"></progress>
+        <progress class="progress progress-primary absolute inset-x-0 bottom-0 h-1 rounded-none" value={progress} max="1"></progress>
       {/if}
     </figure>
     <div class="mt-2 truncate text-sm">{title}</div>

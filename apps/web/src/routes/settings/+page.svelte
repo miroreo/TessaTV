@@ -363,7 +363,7 @@
     </p>
     <form class="grid gap-3 sm:grid-cols-2" onsubmit={saveSso}>
       <label class="label col-span-full cursor-pointer justify-start gap-3">
-        <input type="checkbox" class="toggle toggle-warning" bind:checked={sso.enabled} />
+        <input type="checkbox" class="toggle toggle-primary" bind:checked={sso.enabled} />
         <span class="text-base-content">Offer single sign-on on the login page</span>
       </label>
       <label class="floating-label col-span-full">
@@ -405,7 +405,7 @@
         <input class="input w-full" bind:value={sso.buttonLabel} required maxlength="60" />
       </label>
       <div class="col-span-full flex flex-wrap items-center gap-3">
-        <button type="submit" class="btn btn-warning" disabled={savingSso}>
+        <button type="submit" class="btn btn-primary" disabled={savingSso}>
           {#if savingSso}<span class="loading loading-spinner loading-sm"></span>{/if} Save
         </button>
         {#if ssoMessage}
@@ -441,7 +441,7 @@
         />
       </label>
       <div class="col-span-full flex flex-wrap items-center gap-3">
-        <button class="btn btn-warning" type="submit" disabled={savingJellyfin}>{savingJellyfin ? "Connecting…" : "Save"}</button>
+        <button class="btn btn-primary" type="submit" disabled={savingJellyfin}>{savingJellyfin ? "Connecting…" : "Save"}</button>
         <button class="btn" type="button" onclick={runImport} disabled={importing || !savedJellyfin}>
           {importing ? "Importing…" : "Import watch history"}
         </button>
@@ -478,7 +478,7 @@
         <li class="list-row items-center">
           <div class="list-col-grow">{user.username}</div>
           <div class="flex flex-wrap gap-1">
-            {#if user.isAdmin}<span class="badge badge-sm badge-warning">Admin</span>{/if}
+            {#if user.isAdmin}<span class="badge badge-sm badge-primary">Admin</span>{/if}
             {#if user.usesSso}<span class="badge badge-sm badge-ghost">SSO</span>{/if}
             {#if user.hasPassword}<span class="badge badge-sm badge-ghost">Password</span>{/if}
           </div>
@@ -526,7 +526,7 @@
         <option value="movie">Movies</option>
       </select>
       <input class="input min-w-64 flex-1 font-mono" placeholder="/media/shows" bind:value={path} aria-label="Folder path" required />
-      <button type="submit" class="btn btn-warning" disabled={adding || !path.trim()}>
+      <button type="submit" class="btn btn-primary" disabled={adding || !path.trim()}>
         {#if adding}<span class="loading loading-spinner loading-sm"></span>{:else}<Icon name="add" />{/if} Add folder
       </button>
     </form>

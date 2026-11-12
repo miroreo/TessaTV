@@ -70,12 +70,12 @@
       {#if title.overview}<p class="max-w-2xl py-4 leading-relaxed">{title.overview}</p>{/if}
       <div class="flex items-center gap-2">
         {#if view.next}
-          <a class="btn btn-warning" href="/watch/{view.next.id}"><Icon name="play" /> {playLabel(view.next)}</a>
+          <a class="btn btn-primary" href="/watch/{view.next.id}"><Icon name="play" /> {playLabel(view.next)}</a>
         {:else if view.units.length > 0 && !movie?.progress?.watched}
           <span class="opacity-60">Nothing playable yet.</span>
         {/if}
         {#if movie?.playable}
-          {#if movie.progress?.watched}<span class="text-warning" title="Watched"><Icon name="check" /></span>{/if}
+          {#if movie.progress?.watched}<span class="text-accent" title="Watched"><Icon name="check" /></span>{/if}
           <WatchedMenu
             label={title.title}
             watched={movie.progress?.watched ?? false}
@@ -129,10 +129,10 @@
             {episode.title} <span class="badge badge-ghost badge-sm">missing</span>
           {/if}
           {#if progressFraction(episode.progress) > 0}
-            <progress class="progress progress-warning mt-1 block h-1" value={progressFraction(episode.progress)} max="1"></progress>
+            <progress class="progress progress-primary mt-1 block h-1" value={progressFraction(episode.progress)} max="1"></progress>
           {/if}
         </div>
-        {#if episode.progress?.watched}<span class="text-warning" title="Watched"><Icon name="check" /></span>{/if}
+        {#if episode.progress?.watched}<span class="text-accent" title="Watched"><Icon name="check" /></span>{/if}
         {#if episode.playable}
           <WatchedMenu
             label={episode.title}

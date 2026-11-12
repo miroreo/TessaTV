@@ -26,7 +26,7 @@
     {#if ssoError}<div class="alert alert-error w-full text-sm">{ssoError}</div>{/if}
     {#if data.session.sso}
       <!-- A full page load: the server redirects to the sign-in provider. -->
-      <a class="btn btn-warning w-full" href="/api/auth/oidc/login" data-sveltekit-reload>{data.session.sso.buttonLabel}</a>
+      <a class="btn btn-primary w-full" href="/api/auth/oidc/login" data-sveltekit-reload>{data.session.sso.buttonLabel}</a>
       <details class="collapse-arrow collapse w-full">
         <summary class="collapse-title text-sm opacity-70">Sign in with a password</summary>
         <div class="collapse-content">
