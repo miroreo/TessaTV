@@ -691,7 +691,27 @@ burn-in at ~2× realtime. `loadConfig` treats empty env values as unset: env fil
 `.env.example`'s blank `TMDB_API_KEY=` through as `""`, which used to fail validation and
 stop the container at startup.
 
-### Jellyfin compatibility layer (not yet built)
+### Jellyfin compatibility layer (discovery + sign-in built)
+
+**Built so far (2026-11-11):** `/System/Info/Public`, `/System/Ping`, and sign-in:
+`POST /Users/AuthenticateByName`, `GET /Users/Me`, and Quick Connect (`GET /QuickConnect/Enabled`,
+`POST /QuickConnect/Initiate`, `GET /QuickConnect/Connect?secret=`, `POST /QuickConnect/Authorize?code=`,
+`POST /Users/AuthenticateWithQuickConnect`). Quick Connect is how an SSO-only account signs in on a
+TV: the TV shows a six-digit code, and someone already signed in (by SSO or password) approves it
+at `/link` in the web UI (`POST /api/auth/quick-connect/authorize`) or from any Jellyfin client.
+Pending requests live in memory in `AuthService` (`packages/auth/src/quick-connect.ts`, an LRU
+with a 10-minute TTL like Jellyfin's); a session token is created only when the TV redeems its
+approved secret, once. The `AccessToken` is a normal TessaTV session token, so it works for
+`/api` too. Response types come from `@jellyfin/sdk`.
+
+The TessaTV web UI on a TV works the same way without any Jellyfin client: the login page's
+"Sign in with a code" button calls `POST /api/auth/pairing` (public), shows the code, and polls
+`POST /api/auth/pairing/poll`; approval sets the session cookie. The TV never visits the SSO
+provider — only the approving device does, and only if it isn't signed in yet (the login page's
+`?next=` carries it back to `/link?code=…` after SSO; `next` is same-site paths only).
+
+**Not yet:** views, items, images, playback info, user data/watch state, sessions/websocket.
+
 
 Pure adapter/BFF: owns Jellyfin's routes, JSON shapes, auth header conventions, and
 WebSocket session protocol; contains no business logic. Phased: (1) auth + server

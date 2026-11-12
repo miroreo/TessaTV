@@ -5,8 +5,15 @@ import { setSessionCookie } from "../session-token.js";
 import { OIDC_CALLBACK_PATH, oidcClientConfig, type SsoDependencies } from "../sso.js";
 
 const PENDING_COOKIE = "tessatv_oidc";
+/** Where to land after sign-in (e.g. `/link?code=…`, opened from a TV's prompt). */
+const NEXT_COOKIE = "tessatv_oidc_next";
 /** Long enough to type a password and do 2FA at the provider. */
 const PENDING_MAX_AGE_SECONDS = 10 * 60;
+
+/** Only same-site paths: anything else (`//evil.test`, `https://…`) would be an open redirect. */
+function safeNextPath(value: unknown): string | null {
+  return typeof value === "string" && /^\/(?![/\\])/.test(value) ? value : null;
+}
 
 /** Back to the login page with a message it shows. */
 function failed(reply: FastifyReply, message: string) {
@@ -27,6 +34,8 @@ export function registerOidcRoutes(app: FastifyInstance, auth: AuthService, sso:
     const config = oidcClientConfig((await sso.settings.get()).oidc, sso.clientSecrets);
     if (!config) return failed(reply, "Single sign-on isn't set up");
     try {
+      const next = safeNextPath((request.query as Record<string, unknown>)["next"]);
+      if (next) reply.setCookie(NEXT_COOKIE, next, { ...pendingCookieOptions(request), maxAge: PENDING_MAX_AGE_SECONDS });
       const { url, pending } = await sso.client.start(config);
       reply.setCookie(PENDING_COOKIE, sso.pendingSignIns.seal(JSON.stringify(pending)), {
         ...pendingCookieOptions(request),
@@ -44,6 +53,7 @@ export function registerOidcRoutes(app: FastifyInstance, auth: AuthService, sso:
     const config = oidcClientConfig(oidc, sso.clientSecrets);
     const sealed = request.cookies[PENDING_COOKIE];
     reply.clearCookie(PENDING_COOKIE, pendingCookieOptions(request));
+    reply.clearCookie(NEXT_COOKIE, pendingCookieOptions(request));
     if (!config || !oidc) return failed(reply, "Single sign-on isn't set up");
     const opened = sealed ? sso.pendingSignIns.open(sealed) : null;
     if (!opened) return failed(reply, "That sign-in took too long or came from another browser. Please try again.");
@@ -63,7 +73,7 @@ export function registerOidcRoutes(app: FastifyInstance, auth: AuthService, sso:
       );
       if (result.created) await sso.onAccountCreated?.(result.user);
       setSessionCookie(request, reply, result.token);
-      return reply.redirect("/");
+      return reply.redirect(safeNextPath(request.cookies[NEXT_COOKIE]) ?? "/");
     } catch (error) {
       if (error instanceof AuthError) return failed(reply, error.message);
       request.log.warn({ error: (error as Error).message }, "SSO sign-in failed");

@@ -1,5 +1,5 @@
-import { AuthError, type AuthErrorCode, type AuthService } from "@tessatv/auth";
-import type { LoginResponse, PublicUser, SessionResponse } from "@tessatv/domain";
+import { AuthError, type AuthErrorCode, type AuthService, QUICK_CONNECT_TTL_MS } from "@tessatv/auth";
+import type { LoginResponse, PairingPollResponse, PairingResponse, PublicUser, SessionResponse } from "@tessatv/domain";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -18,6 +18,8 @@ const PUBLIC_API_ROUTES = new Set([
   "/api/auth/setup",
   "/api/auth/login",
   "/api/auth/logout",
+  "/api/auth/pairing",
+  "/api/auth/pairing/poll",
   "/api/auth/oidc/login",
   "/api/auth/oidc/callback",
 ]);
@@ -29,6 +31,7 @@ const ERROR_STATUS: Record<AuthErrorCode, number> = {
   invalid_credentials: 401,
   not_in_required_group: 403,
   username_taken: 409,
+  unknown_quick_connect_code: 404,
 };
 
 const credentialsSchema = { body: z.object({ username: z.string(), password: z.string() }) };
@@ -89,6 +92,43 @@ export function registerAuthRoutes(
       const result = await auth.login(username, password, clientName(request));
       setSessionCookie(request, reply, result.token);
       return { user: result.user, token: result.token } satisfies LoginResponse;
+    } catch (error) {
+      return sendAuthError(reply, error);
+    }
+  });
+
+  // Pairing for a browser that can't sign in comfortably (a TV): it shows `code` and polls
+  // with `secret`; someone signed in approves the code. Same machinery as Jellyfin Quick
+  // Connect, so one approval page serves both. The provider is never involved on the TV.
+  app.post("/api/auth/pairing", async (request): Promise<PairingResponse> => {
+    const pending = auth.initiateQuickConnect({
+      appName: "TessaTV web",
+      appVersion: "",
+      deviceId: "",
+      deviceName: clientName(request) ?? "Browser",
+    });
+    return { code: pending.code, secret: pending.secret, expiresInSeconds: QUICK_CONNECT_TTL_MS / 1000 };
+  });
+
+  app.post("/api/auth/pairing/poll", { schema: { body: z.object({ secret: z.string() }) } }, async (request, reply) => {
+    const { secret } = request.body;
+    const pending = auth.quickConnectStatus(secret);
+    if (!pending) return reply.code(404).send({ error: "pairing_expired", message: "That code expired. Get a new one." });
+    if (!pending.authorizedUserId) return { status: "pending" } satisfies PairingPollResponse;
+    try {
+      const result = await auth.redeemQuickConnect(secret, clientName(request));
+      setSessionCookie(request, reply, result.token);
+      return { status: "approved" } satisfies PairingPollResponse;
+    } catch (error) {
+      return sendAuthError(reply, error);
+    }
+  });
+
+  /** Approves the code a TV (or any Jellyfin client) is showing, as the signed-in user. */
+  app.post("/api/auth/quick-connect/authorize", { schema: { body: z.object({ code: z.string() }) } }, async (request, reply) => {
+    try {
+      auth.authorizeQuickConnect(request.body.code, request.user!.id);
+      return reply.code(204).send();
     } catch (error) {
       return sendAuthError(reply, error);
     }

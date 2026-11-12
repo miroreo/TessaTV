@@ -181,4 +181,32 @@ describe("auth routes", () => {
     expect(good.statusCode).toBe(200);
     expect(String(good.headers["set-cookie"])).toMatch(/^tessatv_session=/);
   });
+
+  it("pairs a signed-out browser: it shows a code, a signed-in user approves it, and it gets a session", async () => {
+    const app = buildTestApp();
+    const setup = await app.inject({ method: "POST", url: "/api/auth/setup", payload: { username: "tessa", password: "hunter2hunter2" } });
+    const owner = sessionCookie(setup.headers["set-cookie"] as string);
+
+    const pairing = (await app.inject({ method: "POST", url: "/api/auth/pairing" })).json();
+    expect(pairing.code).toMatch(/^\d{6}$/);
+    const poll = () => app.inject({ method: "POST", url: "/api/auth/pairing/poll", payload: { secret: pairing.secret } });
+    expect((await poll()).json()).toEqual({ status: "pending" });
+
+    // Approving needs a session; the approver's own session is unaffected.
+    const denied = await app.inject({ method: "POST", url: "/api/auth/quick-connect/authorize", payload: { code: pairing.code } });
+    expect(denied.statusCode).toBe(401);
+    const approved = await app.inject({
+      method: "POST",
+      url: "/api/auth/quick-connect/authorize",
+      headers: { cookie: owner },
+      payload: { code: pairing.code },
+    });
+    expect(approved.statusCode).toBe(204);
+
+    const done = await poll();
+    expect(done.json()).toEqual({ status: "approved" });
+    const tvCookie = sessionCookie(done.headers["set-cookie"] as string);
+    expect((await app.inject({ method: "GET", url: "/api/auth/session", headers: { cookie: tvCookie } })).json().user.username).toBe("tessa");
+    expect((await poll()).statusCode).toBe(404);
+  });
 });

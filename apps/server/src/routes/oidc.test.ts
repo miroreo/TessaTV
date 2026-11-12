@@ -138,10 +138,14 @@ describe("single sign-on", () => {
   }
 
   /** Runs a whole sign-in the way a browser does; returns where TessaTV finally sends it, and its session cookie. */
-  async function signIn(): Promise<{ location: string; session: string | null }> {
-    const start = await app.inject({ method: "GET", url: "/api/auth/oidc/login" });
+  async function signIn(next?: string): Promise<{ location: string; session: string | null }> {
+    const start = await app.inject({
+      method: "GET",
+      url: next ? `/api/auth/oidc/login?next=${encodeURIComponent(next)}` : "/api/auth/oidc/login",
+    });
     expect(start.statusCode).toBe(302);
-    const pending = cookie(start.headers["set-cookie"], "tessatv_oidc");
+    const cookies = ["tessatv_oidc", "tessatv_oidc_next"].map((name) => cookie(start.headers["set-cookie"], name)).filter(Boolean);
+    const pending = cookies.join("; ");
     const atProvider = await fetch(start.headers.location!, { redirect: "manual" });
     const back = new URL(atProvider.headers.get("location")!);
     expect(back.origin + back.pathname).toBe(`${PUBLIC_URL}/api/auth/oidc/callback`);
@@ -187,6 +191,11 @@ describe("single sign-on", () => {
     expect((await configure({ clientSecret: undefined, buttonLabel: "SSO" })).statusCode).toBe(200);
     expect((await signIn()).location).toBe("/");
     expect(created).toEqual(["alex"]);
+
+    // Coming from a TV's prompt: back to the code page. Off-site targets are ignored.
+    expect((await signIn("/link?code=123456")).location).toBe("/link?code=123456");
+    expect((await signIn("//evil.test")).location).toBe("/");
+    expect((await signIn("https://evil.test")).location).toBe("/");
   });
 
   it("makes admin-group members admins, and links the local admin by username", async () => {

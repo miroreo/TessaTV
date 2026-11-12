@@ -16,6 +16,7 @@
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
     "@tessatv/domain": "workspace:*",
+    "lru-cache": "^11.5.3",
     "openid-client": "^6.8.9"
   }
 }

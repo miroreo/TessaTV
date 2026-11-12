@@ -1,4 +1,6 @@
+import type { AuthService } from "@tessatv/auth";
 import type { FastifyInstance } from "fastify";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerSystemRoutes } from "./routes/system.js";
 import { JELLYFIN_API_VERSION, type JellyfinServerInfo } from "./server-info.js";
 
@@ -6,6 +8,8 @@ export interface JellyfinCompatOptions {
   /** Stable 32-hex server id — use `deriveServerId(APP_SECRET)`. */
   readonly serverId: string;
   readonly serverName: string;
+  /** Enables Jellyfin sign-in (password and Quick Connect). Without it, only discovery is served. */
+  readonly auth?: AuthService;
 }
 
 /**
@@ -21,4 +25,5 @@ export function registerJellyfinCompat(app: FastifyInstance, options: JellyfinCo
     version: JELLYFIN_API_VERSION,
   };
   registerSystemRoutes(app, server);
+  if (options.auth) registerAuthRoutes(app, server, options.auth);
 }

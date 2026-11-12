@@ -194,4 +194,37 @@ describe("AuthService", () => {
       await expect(auth.signInWithOidc({ ...alex, subject: "someone-else" }, policy)).rejects.toMatchObject({ code: "username_taken" });
     });
   });
+
+  describe("quick connect", () => {
+    const tv = { appName: "Jellyfin Android TV", appVersion: "1.0", deviceId: "tv-1", deviceName: "Living room" };
+
+    it("lets a device redeem a code a signed-in user approved, exactly once", async () => {
+      const { auth, sessions } = setup();
+      const { user } = await auth.completeSetup("tessa", "hunter2hunter2");
+      const request = auth.initiateQuickConnect(tv);
+      expect(request.code).toMatch(/^\d{6}$/);
+      await expect(auth.redeemQuickConnect(request.secret)).rejects.toMatchObject({ code: "invalid_credentials" });
+
+      auth.authorizeQuickConnect(request.code, user.id);
+      expect(auth.quickConnectStatus(request.secret)?.authorizedUserId).toBe(user.id);
+      const result = await auth.redeemQuickConnect(request.secret, "TV");
+      expect(result.user.id).toBe(user.id);
+      expect(sessions.sessions.size).toBe(2);
+      await expect(auth.redeemQuickConnect(request.secret)).rejects.toMatchObject({ code: "invalid_credentials" });
+    });
+
+    it("rejects unknown codes", async () => {
+      const { auth } = setup();
+      expect(() => auth.authorizeQuickConnect("000000", "u")).toThrow(expectAuthError("unknown_quick_connect_code"));
+    });
+
+    it("expires codes after ten minutes", async () => {
+      let time = new Date("2026-01-01T00:00:00Z").getTime();
+      const { auth } = setup(() => new Date(time));
+      const request = auth.initiateQuickConnect(tv);
+      time += 10 * 60 * 1000 + 1;
+      expect(auth.quickConnectStatus(request.secret)).toBeNull();
+      expect(() => auth.authorizeQuickConnect(request.code, "u")).toThrow(expectAuthError("unknown_quick_connect_code"));
+    });
+  });
 });

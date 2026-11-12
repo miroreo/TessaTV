@@ -3,3 +3,4 @@ export * from "./password.js";
 export * from "./token.js";
 export * from "./oidc.js";
 export * from "./secret-box.js";
+export * from "./quick-connect.js";
