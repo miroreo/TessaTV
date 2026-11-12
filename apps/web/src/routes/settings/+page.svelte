@@ -284,7 +284,7 @@
     <label class="label cursor-pointer justify-start gap-3">
       <input
         type="checkbox"
-        class="toggle toggle-warning"
+        class="toggle toggle-primary"
         checked={health.enabled}
         onchange={(event) => setFileHealth({ fileHealthCheck: event.currentTarget.checked })}
         disabled={savingHealth}
@@ -295,7 +295,7 @@
     <label class="label cursor-pointer items-start justify-start gap-3">
       <input
         type="checkbox"
-        class="toggle toggle-warning mt-0.5"
+        class="toggle toggle-primary mt-0.5"
         checked={health.fullSpeed}
         onchange={(event) => setFileHealth({ fileHealthFullSpeed: event.currentTarget.checked })}
         disabled={savingHealth || !health.enabled}
@@ -328,7 +328,7 @@
     {#if health.current}
       <div class="bg-base-100 rounded-box space-y-2 p-4" aria-live="off">
         <div class="font-mono text-sm break-all">{health.current.path}</div>
-        <progress class="progress progress-warning w-full" value={healthPercent ?? undefined} max="100"></progress>
+        <progress class="progress progress-primary w-full" value={healthPercent ?? undefined} max="100"></progress>
         <div class="flex flex-wrap gap-x-4 text-sm opacity-80">
           <span>{healthPercent !== null ? `${healthPercent.toFixed(1)}%` : "length unknown"}</span>
           <span>
