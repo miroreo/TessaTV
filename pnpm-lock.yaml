@@ -235,6 +235,9 @@ importers:
       '@tessatv/streaming':
         specifier: workspace:*
         version: link:../../packages/streaming
+      '@tessatv/subtitles':
+        specifier: workspace:*
+        version: link:../../packages/subtitles
       '@tessatv/web':
         specifier: workspace:*
         version: link:../web
@@ -399,6 +402,33 @@ importers:
       execa:
         specifier: ^10.2.1
         version: 10.2.1
+
+  packages/subtitles:
+    dependencies:
+      '@ctrl/video-filename-parser':
+        specifier: ^5.12.0
+        version: 5.12.0
+      '@tessatv/domain':
+        specifier: workspace:*
+        version: link:../domain
+      bottleneck:
+        specifier: ^2.19.5
+        version: 2.19.5
+      chardet:
+        specifier: ^2.2.0
+        version: 2.2.0
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
+      iconv-lite:
+        specifier: ^0.7.3
+        version: 0.7.3
+      iso-639-3:
+        specifier: ^3.0.1
+        version: 3.0.1
+      ky:
+        specifier: ^2.2.0
+        version: 2.2.0
 
 packages:
 
@@ -2042,6 +2072,9 @@ packages:
     resolution: {integrity: sha512-E87x8DEyyFLN1EeP5p6j8b/g7gynoV+L6G2zLXAoL1CkkXe7HjNU7JIAf4JozCXJgl5SzxREQq/HzSF/MqhPLw==}
     engines: {node: '>=22'}
 
+  bottleneck@2.19.5:
+    resolution: {integrity: sha512-VHiNCbI1lKdl44tGrhNfU3lup0Tj/ZBMJB5/2ZbNXRCPuRCO7ed2mgcK4r17y+KB2EfuYuRaVlwNbAeaWGSpbw==}
+
   brace-expansion@1.1.21:
     resolution: {integrity: sha512-9zeA+KLZNNzglF2TPKRQEDyx6Yby7daAkuy8MiPzpXPsYDWi/DRM8jmwUDxokQjYqBpv5DgPiwD4h4ZZSy1Ujw==}
 
@@ -2075,6 +2108,9 @@ packages:
   chalk@4.1.2:
     resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
     engines: {node: '>=10'}
+
+  chardet@2.2.0:
+    resolution: {integrity: sha512-rddelWYNPRrXq6PtNEN2S3f6t9ILzvqaN5pVgi4kqt9jHQaXIial9PznB5iSPVlQSLNaaH22ItWz3EJtQ10+OA==}
 
   check-error@2.1.3:
     resolution: {integrity: sha512-PAJdDJusoxnwm1VwW07VWwUN1sl7smmC3OKggvndJFadxxDRyFJBX/ggnu/KE4kQAB7a3Dp8f/YXC1FlUprWmA==}
@@ -2500,6 +2536,9 @@ packages:
       picomatch:
         optional: true
 
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
   figures@6.1.0:
     resolution: {integrity: sha512-d+l3qxjSesT4V7v2fh+QnmFnUWv9lSpjarhShNTgBOfA0ttejbQUAlHLitbjkoRiDulW0OPoQPYIGhIC8ohejg==}
     engines: {node: '>=18'}
@@ -2622,6 +2661,10 @@ packages:
     resolution: {integrity: sha512-eKCa6bwnJhvxj14kZk5NCPc6Hb6BdsU9DZcOnmQKSnO1VKrfV0zCvtttPZUsBvjmNDn8rpcJfpwSYnHBjc95MQ==}
     engines: {node: '>=18.18.0'}
 
+  iconv-lite@0.7.3:
+    resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
+    engines: {node: '>=0.10.0'}
+
   ignore@5.3.2:
     resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
     engines: {node: '>= 4'}
@@ -2695,6 +2738,9 @@ packages:
   isexe@3.1.5:
     resolution: {integrity: sha512-6B3tLtFqtQS4ekarvLVMZ+X+VlvQekbe4taUkf/rhVO3d/h0M2rfARm/pXLcPEsjjMsFgrFgSrhQIxcSVrBz8w==}
     engines: {node: '>=18'}
+
+  iso-639-3@3.0.1:
+    resolution: {integrity: sha512-SdljCYXOexv/JmbQ0tvigHN43yECoscVpe2y2hlEqy/CStXQlroPhZLj7zKLRiGqLJfw8k7B973UAMDoQczVgQ==}
 
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
@@ -3128,6 +3174,9 @@ packages:
   safe-stable-stringify@2.5.0:
     resolution: {integrity: sha512-b3rppTKm9T+PsVCBEOUR46GWI7fdOs00VKZ1+9c1EWDaDMvjQc6tUwuFyIprgGgTcWoVHSKrU8H31ZHA2e0RHA==}
     engines: {node: '>=10'}
+
+  safer-buffer@2.1.2:
+    resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
 
   secure-json-parse@4.1.1:
     resolution: {integrity: sha512-lnd81MQEZKjhW/Gd2TQqdd4XP6QYNdDW/EP+I7nTrFHP9y2LmaGPIHk9xsnzcOiEr1c39c/e84xFgGviQKBTRw==}
@@ -4684,6 +4733,8 @@ snapshots:
 
   basic-auth@3.1.0: {}
 
+  bottleneck@2.19.5: {}
+
   brace-expansion@1.1.21:
     dependencies:
       balanced-match: 1.0.2
@@ -4720,6 +4771,8 @@ snapshots:
     dependencies:
       ansi-styles: 4.3.0
       supports-color: 7.2.0
+
+  chardet@2.2.0: {}
 
   check-error@2.1.3: {}
 
@@ -5187,6 +5240,8 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.7
 
+  fflate@0.8.3: {}
+
   figures@6.1.0:
     dependencies:
       is-unicode-supported: 2.1.0
@@ -5324,6 +5379,10 @@ snapshots:
 
   human-signals@8.0.1: {}
 
+  iconv-lite@0.7.3:
+    dependencies:
+      safer-buffer: 2.1.2
+
   ignore@5.3.2: {}
 
   ignore@7.0.12: {}
@@ -5378,6 +5437,8 @@ snapshots:
   isexe@2.0.0: {}
 
   isexe@3.1.5: {}
+
+  iso-639-3@3.0.1: {}
 
   jiti@2.7.0: {}
 
@@ -5764,6 +5825,8 @@ snapshots:
       ret: 0.5.1
 
   safe-stable-stringify@2.5.0: {}
+
+  safer-buffer@2.1.2: {}
 
   secure-json-parse@4.1.1: {}
 

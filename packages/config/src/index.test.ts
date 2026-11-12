@@ -61,4 +61,11 @@ describe("loadConfig", () => {
     expect(loadConfig(validEnv).TRANSCODE_DIR).toMatch(/tessatv-transcodes$/);
     expect(() => loadConfig({ ...validEnv, HARDWARE_ACCEL: "nvenc" })).toThrow(/HARDWARE_ACCEL/);
   });
+
+  it("needs all three OpenSubtitles values or none, and defaults the subtitle preferences", () => {
+    const config = loadConfig(validEnv);
+    expect(config).toMatchObject({ SUBTITLE_LANGUAGES: "en", SUBTITLE_HEARING_IMPAIRED: "avoid" });
+    expect(() => loadConfig({ ...validEnv, OPENSUBTITLES_API_KEY: "k" })).toThrow(/must be set together/);
+    expect(loadConfig({ ...validEnv, OPENSUBTITLES_API_KEY: "k", OPENSUBTITLES_USERNAME: "u", OPENSUBTITLES_PASSWORD: "p" }).OPENSUBTITLES_USERNAME).toBe("u");
+  });
 });

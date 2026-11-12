@@ -3,6 +3,7 @@ import type {
   FileHealthRepository,
   LibraryRepository,
   LoudnessRepository,
+  SubtitleRepository,
   MediaAvailabilityRepository,
   MetadataCacheRepository,
   ServerSettingsRepository,
@@ -50,6 +51,7 @@ export interface AppDependencies {
     transcodes: TranscodeManager;
     loudnessRepository?: LoudnessRepository;
     fileHealthRepository?: FileHealthRepository;
+    subtitleRepository?: SubtitleRepository;
     /** Hides titles whose files have all gone missing. Without it, every title shows. */
     availability?: MediaAvailabilityRepository;
     probe?: PlaybackDependencies["probe"];
