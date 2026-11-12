@@ -10,6 +10,15 @@ const envSchema = z.object({
   // its key is provided.
   TMDB_API_KEY: z.string().min(1).optional(),
   TVDB_API_KEY: z.string().min(1).optional(),
+  // Subtitle downloads are off until all three OpenSubtitles.com values are set (the key is the
+  // app consumer key from the account's API page; downloads also need the account's login).
+  OPENSUBTITLES_API_KEY: z.string().min(1).optional(),
+  OPENSUBTITLES_USERNAME: z.string().min(1).optional(),
+  OPENSUBTITLES_PASSWORD: z.string().min(1).optional(),
+  // Comma-separated, most wanted first, e.g. `en,pt-BR`. Add `.forced` to a language for its forced track too.
+  SUBTITLE_LANGUAGES: z.string().min(1).default("en"),
+  // Whether to prefer subtitles for the deaf and hard of hearing (SDH), avoid them, or not care.
+  SUBTITLE_HEARING_IMPAIRED: z.enum(["prefer", "avoid", "any"]).default("avoid"),
   // `auto` falls back to software; an explicit `vaapi` that doesn't work fails startup.
   HARDWARE_ACCEL: z.enum(["auto", "none", "vaapi"]).default("auto"),
   VAAPI_DEVICE: z.string().min(1).optional(),
@@ -21,7 +30,10 @@ const envSchema = z.object({
   DIAGNOSTICS_DIR: z.string().min(1).optional(),
   // The first time the JS heap reaches this size, a heap profile and snapshot are written.
   DIAGNOSTICS_CAPTURE_AT_MB: z.coerce.number().int().positive().default(1024),
-});
+}).refine(
+  (env) => [env.OPENSUBTITLES_API_KEY, env.OPENSUBTITLES_USERNAME, env.OPENSUBTITLES_PASSWORD].filter(Boolean).length % 3 === 0,
+  { message: "OPENSUBTITLES_API_KEY, OPENSUBTITLES_USERNAME and OPENSUBTITLES_PASSWORD must be set together", path: ["OPENSUBTITLES_API_KEY"] },
+);
 
 export type AppConfig = z.infer<typeof envSchema>;
 

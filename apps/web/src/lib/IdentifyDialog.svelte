@@ -73,7 +73,7 @@
       }}
     >
       <input class="input input-bordered join-item flex-1" bind:value={typed} placeholder="Search by title" aria-label="Search by title" />
-      <button class="btn btn-warning join-item" disabled={loading}><Icon name="search" /> Search</button>
+      <button class="btn btn-primary join-item" disabled={loading}><Icon name="search" /> Search</button>
     </form>
 
     {#if error}<div class="alert alert-error mb-3">{error}</div>{/if}
@@ -95,7 +95,7 @@
                 <div class="font-semibold">{item.title}{#if item.year} <span class="font-normal opacity-60">({item.year})</span>{/if}</div>
                 {#if item.overview}<p class="line-clamp-3 text-sm opacity-70">{item.overview}</p>{/if}
               </div>
-              <button type="button" class="btn btn-warning btn-sm" disabled={applying !== null} onclick={() => pick(item.externalId)}>
+              <button type="button" class="btn btn-primary btn-sm" disabled={applying !== null} onclick={() => pick(item.externalId)}>
                 {#if applying === item.externalId}<span class="loading loading-spinner loading-xs"></span>{:else}Select{/if}
               </button>
             </li>

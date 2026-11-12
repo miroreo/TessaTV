@@ -654,7 +654,7 @@
   {#if autoplayBlocked && paused && !error}
     <button
       type="button"
-      class="btn btn-warning btn-circle absolute top-1/2 left-1/2 size-20 -translate-1/2"
+      class="btn btn-primary btn-circle absolute top-1/2 left-1/2 size-20 -translate-1/2"
       onclick={() => void video.play()}
       aria-label="Play"
       title="Play (k)"
@@ -677,7 +677,7 @@
       <p>Up next: {episodeCode(info.next)} · {info.next.title}</p>
       <p class="mb-3 opacity-70">Starting in {countdown}s</p>
       <div class="flex justify-center gap-2">
-        <button type="button" class="btn btn-warning btn-sm" onclick={playNext}>Play now</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick={playNext}>Play now</button>
         <button type="button" class="btn btn-ghost btn-sm" onclick={cancelNext}>Cancel</button>
       </div>
     </div>
@@ -713,7 +713,7 @@
 
   <div class="controls absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 py-3">
     <input
-      class="seek range range-warning range-xs w-full"
+      class="seek range range-primary range-xs w-full"
       type="range"
       min="0"
       max={duration || 1}
@@ -769,7 +769,7 @@
       <button
         type="button"
         class="btn btn-ghost btn-circle btn-sm"
-        class:text-warning={normalize}
+        class:text-accent={normalize}
         class:opacity-50={!normalize}
         onclick={toggleNormalize}
         aria-pressed={normalize}
@@ -815,7 +815,7 @@
         <button
           type="button"
           class="btn btn-ghost btn-circle btn-sm"
-          class:text-warning={statsOpen}
+          class:text-accent={statsOpen}
           onclick={() => (statsOpen = !statsOpen)}
           aria-pressed={statsOpen}
           aria-label="Stats for nerds"

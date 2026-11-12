@@ -3,6 +3,8 @@ import { runCommand, type CommandRunner } from "./process.js";
 export interface SubtitleExtractOptions {
   readonly ffmpegPath?: string;
   readonly runner?: CommandRunner;
+  /** The file's text encoding when it isn't UTF-8 (a sidecar file, say): ffmpeg's `-sub_charenc`. */
+  readonly inputCharset?: string;
 }
 
 /**
@@ -21,6 +23,7 @@ export async function extractWebVtt(
     "-nostdin",
     "-v",
     "error",
+    ...(options.inputCharset ? ["-sub_charenc", options.inputCharset] : []),
     "-i",
     path,
     "-map",

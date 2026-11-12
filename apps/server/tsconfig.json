@@ -15,6 +15,7 @@
     { "path": "../../packages/library" },
     { "path": "../../packages/metadata" },
     { "path": "../../packages/persistence" },
-    { "path": "../../packages/streaming" }
+    { "path": "../../packages/streaming" },
+    { "path": "../../packages/subtitles" }
   ]
 }

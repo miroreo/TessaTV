@@ -414,6 +414,10 @@ movie-duplicate merging would need a file-selection policy this doesn't attempt.
 
 ### Acquisition subsystem (not yet built)
 
+Subtitle acquisition (the first acquisition feature, built before video) has its own plan and
+status: `docs/SUBTITLE-ACQUISITION.md`. `packages/subtitles` exists (S1: OpenSubtitles, scoring,
+sidecar files, a 30-minute sweep job); playback of downloaded subtitles is S2.
+
 One `Indexer` port (`search`, `fetchDownloadPayload`, `capabilities`) and one
 `DownloadClient` port (`add`, `getStatus`, `remove`), each implemented by torrent and
 Usenet adapters. Torznab and Newznab are the same underlying XML protocol, so both indexer
@@ -617,6 +621,14 @@ numbers; V8's sampling heap profiler stays on; and the first time the heap passe
 It exists because a leak (~170 MB/min on the owner's server, from ~25 s after startup, no
 traffic needed) never reproduced locally or in a synthetic 9,000-episode library scan, so
 the evidence has to come out of the leaking process itself.
+
+**Scan query fan-out and unbounded paging** (leak review, 2026-11-11): `listChildren` and
+`listUnits` used to run one `external_id` query per row, and the importer lists the library root
+once per movie, so a scan queued millions of queries in the pg pool (the scan runs ~25 s after
+boot via pg-boss's `missed: "once"`, matching the leak's timing). They now load a whole
+listing's external ids in one query (`loadExternalIdsGrouped`). `TvdbClient.getAllPages` also
+throws if `links.next` doesn't advance or passes 200 pages, instead of collecting forever.
+Neither is confirmed as the leak — only the diagnostics capture will say.
 
 **Volume normalization** (on by default, toggle in the player, remembered per browser):
 the `loudness-scan` job (pg-boss, every 15 min, ≤10 min per run so it fits pg-boss's job
