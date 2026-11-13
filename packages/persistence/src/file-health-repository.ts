@@ -1,5 +1,5 @@
-import type { DamagedFile, FileHealth, FileHealthRepository, FileHealthSummary } from "@tessatv/domain";
-import { asc, count, desc, eq, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
+import type { FileHealth, FileHealthRepository, FileHealthSummary, FlaggedFile } from "@tessatv/domain";
+import { asc, count, desc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { Database } from "./db.js";
 import { fileHealth, mediaFile } from "./schema.js";
 
@@ -12,11 +12,11 @@ export class DrizzleFileHealthRepository implements FileHealthRepository {
   }
 
   async save(health: FileHealth): Promise<void> {
-    const { checkedAt, sizeBytes, error } = health;
+    const { checkedAt, sizeBytes, error, severity, videoErrors, audioErrors } = health;
     await this.db
       .insert(fileHealth)
       .values(health)
-      .onConflictDoUpdate({ target: fileHealth.mediaFileId, set: { checkedAt, sizeBytes, error } });
+      .onConflictDoUpdate({ target: fileHealth.mediaFileId, set: { checkedAt, sizeBytes, error, severity, videoErrors, audioErrors } });
   }
 
   async summary(staleBefore: Date): Promise<FileHealthSummary> {
@@ -24,24 +24,33 @@ export class DrizzleFileHealthRepository implements FileHealthRepository {
     const [row] = await this.db
       .select({
         total: count(),
-        clean: count(sql`case when ${fileHealth.mediaFileId} is not null and ${fileHealth.error} is null then 1 end`),
-        damaged: count(sql`case when ${fileHealth.error} is not null then 1 end`),
+        clean: count(sql`case when ${fileHealth.severity} = 'clean' then 1 end`),
+        minor: count(sql`case when ${fileHealth.severity} = 'minor' then 1 end`),
+        major: count(sql`case when ${fileHealth.severity} = 'major' then 1 end`),
         due: count(sql`case when ${due} then 1 end`),
       })
       .from(mediaFile)
       .leftJoin(fileHealth, eq(fileHealth.mediaFileId, mediaFile.id));
-    return row ?? { total: 0, clean: 0, damaged: 0, due: 0 };
+    return row ?? { total: 0, clean: 0, minor: 0, major: 0, due: 0 };
   }
 
-  async listDamaged(limit: number): Promise<DamagedFile[]> {
+  async listFlagged(limit: number): Promise<FlaggedFile[]> {
     const rows = await this.db
-      .select({ mediaFileId: fileHealth.mediaFileId, path: mediaFile.path, error: fileHealth.error, checkedAt: fileHealth.checkedAt })
+      .select({
+        mediaFileId: fileHealth.mediaFileId,
+        path: mediaFile.path,
+        error: fileHealth.error,
+        severity: fileHealth.severity,
+        videoErrors: fileHealth.videoErrors,
+        audioErrors: fileHealth.audioErrors,
+        checkedAt: fileHealth.checkedAt,
+      })
       .from(fileHealth)
       .innerJoin(mediaFile, eq(mediaFile.id, fileHealth.mediaFileId))
-      .where(isNotNull(fileHealth.error))
-      .orderBy(desc(fileHealth.checkedAt))
+      .where(ne(fileHealth.severity, "clean"))
+      .orderBy(sql`case when ${fileHealth.severity} = 'major' then 0 else 1 end`, desc(fileHealth.checkedAt))
       .limit(limit);
-    return rows.map((row) => ({ ...row, error: row.error ?? "" }));
+    return rows.map(({ severity, error, ...row }) => ({ ...row, error: error ?? "", severity: severity === "major" ? "major" : "minor" }));
   }
 
   async listDue(limit: number, staleBefore: Date): Promise<{ id: string; path: string; sizeBytes: number }[]> {

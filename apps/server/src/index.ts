@@ -205,8 +205,10 @@ const fileHealth = new FileHealthMonitor({
   isEnabled: async () => (await serverSettings.get()).fileHealthCheck,
   isFullSpeed: async () => (await serverSettings.get()).fileHealthFullSpeed,
   isBusy: () => transcodes.runningCount > 0,
-  onChecked: (path, error) =>
-    error ? app.log.warn({ path, error }, "file failed its decode check") : app.log.debug({ path }, "file passed its decode check"),
+  onChecked: (path, { severity, error, videoErrors, audioErrors }) =>
+    severity === "clean"
+      ? app.log.debug({ path }, "file passed its decode check")
+      : app.log.warn({ path, severity, videoErrors, audioErrors, error }, "file failed its decode check"),
   onError: (path, error) => app.log.warn({ path, error: error.message }, "couldn't run the decode check"),
 });
 

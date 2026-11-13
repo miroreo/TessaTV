@@ -131,18 +131,25 @@ class InMemorySettings implements ServerSettingsRepository {
   }
 }
 
-/** Reports the files in `damaged` as the background decode check would have found them. */
+/** Reports the files in `damaged` (major) and `minor` as the background decode check would have found them. */
 class FakeFileHealth implements FileHealthRepository {
   readonly damaged = new Set<string>();
+  readonly minor = new Set<string>();
   async get(mediaFileId: string): Promise<FileHealth | null> {
-    return this.damaged.has(mediaFileId) ? { mediaFileId, checkedAt: new Date(5000), sizeBytes: 26, error: "error while decoding MB 3 13" } : null;
+    const severity = this.damaged.has(mediaFileId) ? "major" : this.minor.has(mediaFileId) ? "minor" : null;
+    return severity
+      ? { mediaFileId, checkedAt: new Date(5000), sizeBytes: 26, error: "error while decoding MB 3 13", severity, videoErrors: 1, audioErrors: 0 }
+      : null;
   }
   async save() {}
   async summary() {
-    return { total: 3, clean: 1, damaged: 1, due: 1 };
+    return { total: 4, clean: 1, minor: 1, major: 1, due: 1 };
   }
-  async listDamaged() {
-    return [{ mediaFileId: "file-film", path: "/media/film.mp4", error: "error while decoding MB 3 13", checkedAt: new Date(5000) }];
+  async listFlagged() {
+    return [
+      { mediaFileId: "file-film", path: "/media/film.mp4", error: "error while decoding MB 3 13", severity: "major" as const, videoErrors: 30, audioErrors: 0, checkedAt: new Date(5000) },
+      { mediaFileId: "file-show", path: "/media/show.mkv", error: "[ac3 @ 0x1] error decoding the audio block", severity: "minor" as const, videoErrors: 0, audioErrors: 2, checkedAt: new Date(6000) },
+    ];
   }
   async listDue() {
     return [];
@@ -445,6 +452,16 @@ describe("browse, playback and progress routes", () => {
     }
   });
 
+  it("leaves a file the decode check graded minor on its normal playback path", async () => {
+    fileHealth.minor.add("file-film");
+    try {
+      const started = await app.inject({ method: "POST", url: "/api/playback/film/start", headers, payload: { capabilities: CAPABILITIES } });
+      expect(started.json()).toMatchObject({ mode: "direct-play" });
+    } finally {
+      fileHealth.minor.clear();
+    }
+  });
+
   it("shows the decode check's progress and findings to admins", async () => {
     const status = (await app.inject({ method: "GET", url: "/api/file-health", headers })).json();
     expect(status).toEqual({
@@ -452,8 +469,11 @@ describe("browse, playback and progress routes", () => {
       fullSpeed: false,
       state: "checking",
       current: { path: "/media/e1.mkv", startedAt: new Date(7000).toISOString(), durationSeconds: 600, positionSeconds: 150, fps: 96, speed: 4 },
-      total: 3, clean: 1, damaged: 1, due: 1,
-      damagedFiles: [{ path: "/media/film.mp4", error: "error while decoding MB 3 13", checkedAt: new Date(5000).toISOString() }],
+      total: 4, clean: 1, minor: 1, major: 1, due: 1,
+      flaggedFiles: [
+        { path: "/media/film.mp4", error: "error while decoding MB 3 13", severity: "major", videoErrors: 30, audioErrors: 0, checkedAt: new Date(5000).toISOString() },
+        { path: "/media/show.mkv", error: "[ac3 @ 0x1] error decoding the audio block", severity: "minor", videoErrors: 0, audioErrors: 2, checkedAt: new Date(6000).toISOString() },
+      ],
     });
     await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { fileHealthCheck: false } });
     try {

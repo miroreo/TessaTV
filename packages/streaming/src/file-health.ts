@@ -1,6 +1,6 @@
 import { access } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { FILE_HEALTH_RECHECK_DAYS, type FileHealthRepository } from "@tessatv/domain";
+import { FILE_HEALTH_RECHECK_DAYS, type FileHealth, type FileHealthRepository, type FileHealthSeverity } from "@tessatv/domain";
 import { FfmpegProgressParser, type FfmpegProgress } from "./ffmpeg-progress.js";
 import { probeMedia } from "./media-probe.js";
 import { runCommand, type CommandRunner } from "./process.js";
@@ -27,15 +27,41 @@ const MAX_ERROR_CHARS = 500;
 // otherwise fill the stored message and hide any real decode error behind them.
 const NON_MONOTONIC_DTS = /Application provided invalid, non monotonically increasing dts to muxer/;
 
+// Messages are prefixed with the component that printed them: `[ac3 @ 0x5b...] error decoding the audio block`.
+// Newer ffmpegs also print the stream's own line, `[aist#0:1/aac @ 0x5b...] [dec:aac @ 0x5b...] Error submitting packet`.
+const AUDIO_CODEC = "aac\\w*|ac3|eac3|dca|dts\\w*|mp[123]\\w*|flac|opus|vorbis|truehd|mlp|alac|wma\\w*|pcm_\\w+";
+const AUDIO_MESSAGE = new RegExp(`^\\[(?:aist#\\S+|dec:(?:${AUDIO_CODEC})|(?:${AUDIO_CODEC})) @`);
+/** More video errors than this and a file is `major`; a handful of concealed ones is `minor`. */
+export const MAJOR_VIDEO_ERROR_LIMIT = 10;
+
+/** What a check found: the stored result minus which file it was and when. */
+export type FileHealthFinding = Pick<FileHealth, "error" | "severity" | "videoErrors" | "audioErrors">;
+
 /**
- * Decodes the first video and audio streams end to end on the CPU and returns what ffmpeg
- * complained about, or null when the file is clean. Deliberately software-only: a damaged
- * file can hang a GPU decoder, which is exactly what this exists to find out safely. Runs
- * at the lowest CPU priority, on one thread, throttled to `readRate`× realtime so a check
- * never gets in playback's way; a long film takes the better part of an hour. `fullSpeed`
- * lifts the throttle and the thread limit, for catching up on a library.
+ * Grades ffmpeg's output. A non-zero exit, or more than `MAJOR_VIDEO_ERROR_LIMIT` video
+ * errors, is `major`. Anything else it printed is `minor` (a few concealed video errors, or
+ * trouble confined to the audio, which decoders skip over), and silence is `clean`.
  */
-export async function checkFileHealth(path: string, options: FileHealthCheckOptions = {}): Promise<string | null> {
+export function gradeFileHealth(exitCode: number, stderr: string): FileHealthFinding {
+  const messages = stderr.split("\n").filter((line) => line.trim() && !NON_MONOTONIC_DTS.test(line));
+  const audioErrors = messages.filter((line) => AUDIO_MESSAGE.test(line)).length;
+  const videoErrors = messages.length - audioErrors;
+  const severity: FileHealthSeverity =
+    exitCode !== 0 || videoErrors > MAJOR_VIDEO_ERROR_LIMIT ? "major" : messages.length > 0 ? "minor" : "clean";
+  if (severity === "clean") return { error: null, severity, videoErrors, audioErrors };
+  const error = (messages.length > 0 ? messages.join("\n") : `ffmpeg exited with code ${exitCode}`).slice(0, MAX_ERROR_CHARS);
+  return { error, severity, videoErrors, audioErrors };
+}
+
+/**
+ * Decodes the first video and audio streams end to end on the CPU and grades what ffmpeg
+ * complained about. Deliberately software-only: a damaged file can hang a GPU decoder, which
+ * is exactly what this exists to find out safely. Runs at the lowest CPU priority, on one
+ * thread, throttled to `readRate`× realtime so a check never gets in playback's way; a long
+ * film takes the better part of an hour. `fullSpeed` lifts the throttle and the thread limit,
+ * for catching up on a library. It reads on past a first error so the errors can be counted.
+ */
+export async function checkFileHealth(path: string, options: FileHealthCheckOptions = {}): Promise<FileHealthFinding> {
   const runner = options.runner ?? runCommand;
   const parser = new FfmpegProgressParser((progress) => options.onProgress?.(progress));
   const result = await runner(
@@ -45,8 +71,6 @@ export async function checkFileHealth(path: string, options: FileHealthCheckOpti
       options.ffmpegPath ?? "ffmpeg",
       "-hide_banner", "-nostdin",
       "-v", "error", "-nostats", "-progress", "pipe:1",
-      // Stop at the first hard decode error instead of reading on to the end.
-      "-xerror",
       ...(options.fullSpeed ? [] : ["-threads", "1", "-readrate", String(options.readRate ?? DEFAULT_READ_RATE)]),
       "-i", path,
       // Optional (`?`) so a file with no audio isn't reported as broken.
@@ -61,14 +85,8 @@ export async function checkFileHealth(path: string, options: FileHealthCheckOpti
   );
   // At `-v error` ffmpeg prints only real errors (warnings, like odd timestamps, are hidden),
   // and exits 0 on plenty of them: a HEVC stream with broken references or a Matroska element
-  // overrunning its parent decodes "successfully" with errors logged. So anything printed counts.
-  const messages = result.stderr
-    .split("\n")
-    .filter((line) => !NON_MONOTONIC_DTS.test(line))
-    .join("\n")
-    .trim();
-  if (result.exitCode === 0 && !messages) return null;
-  return (messages || `ffmpeg exited with code ${result.exitCode}`).slice(0, MAX_ERROR_CHARS);
+  // overrunning its parent decodes "successfully" with errors logged. So the output is graded, not just the exit code.
+  return gradeFileHealth(result.exitCode, result.stderr);
 }
 
 export type FileHealthMonitorState = "disabled" | "waiting" | "checking" | "idle";
@@ -104,7 +122,7 @@ export interface FileHealthMonitorOptions {
   readonly isFullSpeed?: () => Promise<boolean>;
   /** True while something more important is using the CPU (a running transcode); checks wait, except at full speed. */
   readonly isBusy: () => boolean;
-  readonly onChecked?: (path: string, error: string | null) => void;
+  readonly onChecked?: (path: string, finding: FileHealthFinding) => void;
   readonly onError?: (path: string, error: Error) => void;
   /** How long to wait when nothing is due. */
   readonly idleMs?: number;
@@ -115,7 +133,7 @@ export interface FileHealthMonitorOptions {
   /** How often a running check looks at whether it's still enabled. */
   readonly enabledPollMs?: number;
   /** Test seams. */
-  readonly check?: (path: string, signal: AbortSignal, onProgress: (progress: FfmpegProgress) => void, fullSpeed: boolean) => Promise<string | null>;
+  readonly check?: (path: string, signal: AbortSignal, onProgress: (progress: FfmpegProgress) => void, fullSpeed: boolean) => Promise<FileHealthFinding>;
   readonly duration?: (path: string) => Promise<number | null>;
   readonly exists?: (path: string) => Promise<boolean>;
   readonly now?: () => number;
@@ -228,7 +246,7 @@ export class FileHealthMonitor {
     try {
       if (!(await this.exists(file.path))) throw new Error("File not found");
       this.current = { ...current, durationSeconds: await this.duration(file.path) };
-      const error = await this.check(
+      const finding = await this.check(
         file.path,
         signal,
         ({ outTimeSeconds, fps, speed }) => {
@@ -237,8 +255,8 @@ export class FileHealthMonitor {
         fullSpeed,
       );
       if (signal.aborted) return settingChanged;
-      await this.options.repository.save({ mediaFileId: file.id, checkedAt: new Date(this.now()), sizeBytes: file.sizeBytes, error });
-      this.options.onChecked?.(file.path, error);
+      await this.options.repository.save({ mediaFileId: file.id, checkedAt: new Date(this.now()), sizeBytes: file.sizeBytes, ...finding });
+      this.options.onChecked?.(file.path, finding);
     } catch (error) {
       // Stopped for good: no. A setting changed mid-check: yes, so the loop sees it at once.
       if (signal.aborted) return settingChanged;

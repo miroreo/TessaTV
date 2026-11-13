@@ -59,7 +59,7 @@ describe.skipIf(!ffmpegAvailable)("streaming against real ffmpeg", () => {
   it("decode-checks a clean file, reporting progress, and flags one with a corrupted stretch", async () => {
     const positions: number[] = [];
     const clean = await checkFileHealth(samplePath, { readRate: 100, onProgress: ({ outTimeSeconds }) => positions.push(outTimeSeconds) });
-    expect(clean).toBeNull();
+    expect(clean).toMatchObject({ severity: "clean", error: null });
     expect(positions.length).toBeGreaterThan(0);
     expect(Math.max(...positions)).toBeCloseTo(4, 0);
 
@@ -67,7 +67,7 @@ describe.skipIf(!ffmpegAvailable)("streaming against real ffmpeg", () => {
     const damagedPath = join(root, "damaged.mkv");
     randomBytes(4000).copy(bytes, Math.floor(bytes.length / 2));
     await writeFile(damagedPath, bytes);
-    expect(await checkFileHealth(damagedPath, { readRate: 100 })).toEqual(expect.any(String));
+    expect(await checkFileHealth(damagedPath, { readRate: 100 })).toMatchObject({ error: expect.any(String), severity: expect.stringMatching(/minor|major/) });
   });
 
   it("remuxes into fMP4 HLS without re-encoding video", async () => {

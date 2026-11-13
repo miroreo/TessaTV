@@ -360,9 +360,10 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       if (!media) return reply;
       const settings = await deps.settings?.get();
       const maxHeight = settings?.maxStreamHeight ?? undefined;
-      // A file the background check found damaged starts on the CPU-only, error-tolerant level —
-      // unless an admin turned the check off, which also sets its findings aside.
-      const damaged = settings?.fileHealthCheck !== false && (await deps.fileHealthRepository?.get(playable.file.id))?.error != null;
+      // A file the background check found badly damaged starts on the CPU-only, error-tolerant level —
+      // unless an admin turned the check off, which also sets its findings aside. Minor findings
+      // (a few concealed errors, or audio-only ones) don't change how the file plays.
+      const damaged = settings?.fileHealthCheck !== false && (await deps.fileHealthRepository?.get(playable.file.id))?.severity === "major";
       const startLevel = Math.max(request.body.fallbackLevel ?? 0, damaged ? DAMAGED_FILE_FALLBACK_LEVEL : 0) as FallbackLevel;
       const subtitle = await resolveSubtitleChoice(playable.unit.id, subtitleStreamIndex);
       try {
@@ -430,7 +431,15 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
           container: media.container,
           sizeBytes: media.sizeBytes,
           bitRate: media.bitRate,
-          health: health ? { checkedAt: health.checkedAt.toISOString(), error: health.error } : null,
+          health: health
+            ? {
+                checkedAt: health.checkedAt.toISOString(),
+                error: health.error,
+                severity: health.severity,
+                videoErrors: health.videoErrors,
+                audioErrors: health.audioErrors,
+              }
+            : null,
         },
         sourceVideo: sourceVideo
           ? {
