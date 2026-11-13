@@ -40,10 +40,10 @@ async function mediaFile(importedAt: Date, sizeBytes = 1) {
 describe("DrizzleFileHealthRepository", () => {
   it("upserts a file's result", async () => {
     const id = await mediaFile(new Date());
-    const result = { mediaFileId: id, checkedAt: new Date(1000), sizeBytes: 1, error: null };
+    const result = { mediaFileId: id, checkedAt: new Date(1000), sizeBytes: 1, error: null, severity: "clean" as const, videoErrors: 0, audioErrors: 0 };
     await health.save(result);
-    await health.save({ ...result, error: "bad frame" });
-    expect(await health.get(id)).toEqual({ ...result, error: "bad frame" });
+    await health.save({ ...result, error: "bad frame", severity: "minor", videoErrors: 2, audioErrors: 1 });
+    expect(await health.get(id)).toEqual({ ...result, error: "bad frame", severity: "minor", videoErrors: 2, audioErrors: 1 });
   });
 
   it("lists never-checked files first (newest import first), then changed ones, then stale ones", async () => {
@@ -58,9 +58,9 @@ describe("DrizzleFileHealthRepository", () => {
       await mediaFile(new Date(future + 4000)),
       await mediaFile(new Date(future + 5000)),
     ];
-    await health.save({ mediaFileId: changed, checkedAt: new Date(future + 10), sizeBytes: 49, error: null });
-    await health.save({ mediaFileId: stale, checkedAt: old, sizeBytes: 1, error: null });
-    await health.save({ mediaFileId: clean, checkedAt: new Date(future + 10), sizeBytes: 1, error: null });
+    await health.save({ mediaFileId: changed, checkedAt: new Date(future + 10), sizeBytes: 49, error: null, severity: "clean", videoErrors: 0, audioErrors: 0 });
+    await health.save({ mediaFileId: stale, checkedAt: old, sizeBytes: 1, error: null, severity: "clean", videoErrors: 0, audioErrors: 0 });
+    await health.save({ mediaFileId: clean, checkedAt: new Date(future + 10), sizeBytes: 1, error: null, severity: "clean", videoErrors: 0, audioErrors: 0 });
 
     const due = await health.listDue(100_000, staleBefore);
     const ours: string[] = [freshNew, freshOld, changed, stale, clean];
@@ -68,36 +68,40 @@ describe("DrizzleFileHealthRepository", () => {
     expect(due.find((file) => file.id === changed)?.sizeBytes).toBe(50);
   });
 
-  it("counts clean, damaged and due files, and lists the damaged ones newest check first", async () => {
+  it("counts clean, minor, major and due files, and lists the flagged ones major first, then newest check first", async () => {
     const future = Date.now() + 200 * 24 * 3600 * 1000;
     const staleBefore = new Date(future);
-    const [clean, damagedOlder, damagedNewer, unchecked] = [
+    const [clean, minorNewer, majorOlder, minorOlder, unchecked] = [
+      await mediaFile(new Date(future)),
       await mediaFile(new Date(future)),
       await mediaFile(new Date(future)),
       await mediaFile(new Date(future)),
       await mediaFile(new Date(future)),
     ];
-    const fresh = new Date(future + 10);
-    await health.save({ mediaFileId: clean, checkedAt: fresh, sizeBytes: 1, error: null });
-    await health.save({ mediaFileId: damagedOlder, checkedAt: new Date(future + 20), sizeBytes: 1, error: "bad frame" });
-    await health.save({ mediaFileId: damagedNewer, checkedAt: new Date(future + 30), sizeBytes: 1, error: "bad packet" });
+    const base = { sizeBytes: 1, severity: "minor" as const, videoErrors: 1, audioErrors: 0 };
+    await health.save({ mediaFileId: clean, checkedAt: new Date(future + 10), sizeBytes: 1, error: null, severity: "clean", videoErrors: 0, audioErrors: 0 });
+    await health.save({ ...base, mediaFileId: minorOlder, checkedAt: new Date(future + 20), error: "bad frame" });
+    await health.save({ ...base, mediaFileId: minorNewer, checkedAt: new Date(future + 30), error: "bad packet", videoErrors: 0, audioErrors: 4 });
+    await health.save({ ...base, mediaFileId: majorOlder, checkedAt: new Date(future + 15), error: "exited", severity: "major", videoErrors: 30 });
 
     // Other test files add and remove files in the same table at the same time, so only
-    // lower bounds hold: our four files, three checked (one clean, two damaged), one due.
+    // lower bounds hold: our five files, four checked (one clean, two minor, one major), one due.
     const summary = await health.summary(staleBefore);
-    expect(summary.total).toBeGreaterThanOrEqual(4);
+    expect(summary.total).toBeGreaterThanOrEqual(5);
     expect(summary.clean).toBeGreaterThanOrEqual(1);
-    expect(summary.damaged).toBeGreaterThanOrEqual(2);
+    expect(summary.minor).toBeGreaterThanOrEqual(2);
+    expect(summary.major).toBeGreaterThanOrEqual(1);
     expect(summary.due).toBeGreaterThanOrEqual(1);
-    expect(summary.clean + summary.damaged).toBeLessThanOrEqual(summary.total);
+    expect(summary.clean + summary.minor + summary.major).toBeLessThanOrEqual(summary.total);
     expect(unchecked).toBeDefined();
 
-    const ours: string[] = [damagedOlder, damagedNewer];
-    const damaged = (await health.listDamaged(100_000)).filter((file) => ours.includes(file.mediaFileId));
-    expect(damaged.map((file) => [file.mediaFileId, file.error])).toEqual([
-      [damagedNewer, "bad packet"],
-      [damagedOlder, "bad frame"],
+    const ours: string[] = [minorOlder, minorNewer, majorOlder];
+    const flagged = (await health.listFlagged(100_000)).filter((file) => ours.includes(file.mediaFileId));
+    expect(flagged.map((file) => [file.mediaFileId, file.severity, file.error])).toEqual([
+      [majorOlder, "major", "exited"],
+      [minorNewer, "minor", "bad packet"],
+      [minorOlder, "minor", "bad frame"],
     ]);
-    expect(damaged[0]?.path).toBe(`/media/${damagedNewer}.mkv`);
+    expect(flagged[1]).toMatchObject({ path: `/media/${minorNewer}.mkv`, videoErrors: 0, audioErrors: 4 });
   });
 });

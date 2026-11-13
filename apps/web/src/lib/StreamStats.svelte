@@ -130,9 +130,9 @@
         [
           "Decode check",
           server.file.health
-            ? server.file.health.error
-              ? `damaged: ${server.file.health.error}`
-              : `clean (checked ${new Date(server.file.health.checkedAt).toLocaleDateString()})`
+            ? server.file.health.severity === "clean"
+              ? `clean (checked ${new Date(server.file.health.checkedAt).toLocaleDateString()})`
+              : `${server.file.health.severity} (${server.file.health.videoErrors} video, ${server.file.health.audioErrors} audio errors): ${server.file.health.error}`
             : "not checked yet",
         ],
         [

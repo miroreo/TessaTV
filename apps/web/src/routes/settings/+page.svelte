@@ -278,8 +278,10 @@
     <h2 class="card-title">File health check</h2>
     <p class="text-sm opacity-70">
       Slowly decodes every video file in the background, on the CPU at the lowest priority and only while nothing is transcoding,
-      to find damaged files before anyone plays them. A damaged file is always transcoded on the CPU, never played directly.
-      Each file is checked again every 90 days, or when it changes.
+      to find damaged files before anyone plays them. Each file is graded: <strong>minor</strong> means a few errors that decoders
+      normally hide, or trouble in the audio only, and the file plays as usual; <strong>major</strong> means the decode failed or
+      the video has many errors, and the file is always transcoded on the CPU, never played directly. Each file is checked again
+      every 90 days, or when it changes.
     </p>
     <label class="label cursor-pointer justify-start gap-3">
       <input
@@ -313,12 +315,18 @@
     <div class="stats stats-vertical sm:stats-horizontal bg-base-100 w-full">
       <div class="stat">
         <div class="stat-title">Checked</div>
-        <div class="stat-value text-2xl">{health.clean + health.damaged} <span class="text-base font-normal opacity-70">of {health.total}</span></div>
+        <div class="stat-value text-2xl">{health.clean + health.minor + health.major} <span class="text-base font-normal opacity-70">of {health.total}</span></div>
         <div class="stat-desc">{health.due} waiting</div>
       </div>
       <div class="stat">
-        <div class="stat-title">Damaged</div>
-        <div class="stat-value text-2xl" class:text-error={health.damaged > 0}>{health.damaged}</div>
+        <div class="stat-title">Minor</div>
+        <div class="stat-value text-2xl" class:text-warning={health.minor > 0}>{health.minor}</div>
+        <div class="stat-desc">play as usual</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Major</div>
+        <div class="stat-value text-2xl" class:text-error={health.major > 0}>{health.major}</div>
+        <div class="stat-desc">transcoded on the CPU</div>
       </div>
       <div class="stat">
         <div class="stat-title">Status</div>
@@ -339,14 +347,20 @@
         </div>
       </div>
     {/if}
-    {#if health.damagedFiles.length > 0}
-      <h3 class="mt-2 font-semibold">Damaged files</h3>
+    {#if health.flaggedFiles.length > 0}
+      <h3 class="mt-2 font-semibold">Files with errors</h3>
       <ul class="divide-base-300 divide-y text-sm">
-        {#each health.damagedFiles as file (file.path)}
+        {#each health.flaggedFiles as file (file.path)}
           <li class="py-2">
-            <div class="font-mono break-all">{file.path}</div>
-            <div class="text-error break-words opacity-90">{file.error}</div>
-            <div class="text-xs opacity-60">checked {new Date(file.checkedAt).toLocaleString()}</div>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="badge {file.severity === 'major' ? 'badge-error' : 'badge-warning'}">{file.severity}</span>
+              <span class="font-mono break-all">{file.path}</span>
+            </div>
+            <div class="break-words whitespace-pre-line opacity-90" class:text-error={file.severity === "major"}>{file.error}</div>
+            <div class="text-xs opacity-60">
+              {file.videoErrors} video, {file.audioErrors} audio {file.videoErrors + file.audioErrors === 1 ? "error" : "errors"} · checked
+              {new Date(file.checkedAt).toLocaleString()}
+            </div>
           </li>
         {/each}
       </ul>

@@ -586,25 +586,42 @@ player shows a large play button in that case rather than sitting silently pause
 
 **File health check** (`FileHealthMonitor`, `packages/streaming/src/file-health.ts`): a
 background loop decodes every media file end to end on the CPU — `nice -n 19`, one thread,
-`-readrate 4` — and records the result in `file_health` (migration 0015). Damage is a
-non-zero exit *or any output at `-v error`* (which hides warnings such as odd timestamps):
+`-readrate 4` — and records the result in `file_health` (migration 0015). The output at
+`-v error` (which hides warnings such as odd timestamps) counts, not just the exit code:
 ffmpeg exits 0 on plenty of real corruption — a HEVC stream with broken references, a
 Matroska element overrunning its parent — and only logs it. Found by corrupting a HEVC
-file: the exit code alone missed it, though H.264 in MP4 exited 183. Order: never-checked files (newest import first), files whose
+file: the exit code alone missed it, though H.264 in MP4 exited 183.
+
+The result is graded (`gradeFileHealth`, migration 0018): **clean** (silent, exit 0),
+**minor** (messages, but trouble confined to the audio or at most `MAJOR_VIDEO_ERROR_LIMIT`
+= 10 video/container messages) and **major** (non-zero exit, or more video messages than
+that). The check no longer passes `-xerror`, so it reads to the end and the messages can be
+counted, split into video and audio by the component prefix (`[ac3 @ …]`, `[aist#0:1/aac @ …]`).
+Why: on the owner's server 411 of 1,906 files were "damaged" under the all-or-nothing rule,
+yet they play fine; a decoder conceals a bad slice or skips an audio block (one file printed
+768 audio messages). Only major files take the fallback below. `[null @ …] Application
+provided invalid, non monotonically increasing dts to muxer` is dropped before grading: the
+null muxer prints it once per frame for MKVs with coarse timebases (315 of those files, all
+harmless on a full re-decode), and it used to fill the 500-char stored message and hide real
+errors. The limit of 10 is a judgement call, not measured; revisit it with real data.
+
+Order: never-checked files (newest import first), files whose
 size changed, then each file again after 90 days. It waits while any transcode is running,
 and skips a file it can't run on (missing, ffmpeg absent) until the next restart. It is a
 loop rather than a pg-boss job because one check of a long film outlasts a job's 15-minute
-expiry. `POST .../start` begins a damaged file at fallback level 2 (CPU-only, error-tolerant,
-so no direct play), and the stats for nerds show the result. Not a guarantee: a file that
-decodes cleanly on the CPU can still upset a GPU decoder, which is why GPU decode is opt-in.
+expiry. `POST .../start` begins a *major* file at fallback level 2 (CPU-only, error-tolerant,
+so no direct play); minor files play as normal. The stats for nerds show the grade and the
+counts. Not a guarantee: a file that decodes cleanly on the CPU can still upset a GPU
+decoder, which is why GPU decode is opt-in.
 
 It is a server setting, `fileHealthCheck` (admin Settings page → "File health check", on by
 default). The monitor reads it before every file and every 15s during one, so turning it off
 kills the check in progress at once; results stay stored but stop affecting playback while
 it's off, which is the way out of a false positive. The same card shows progress from
 `GET /api/file-health` (admin-only; refreshed every 10s while the page is open): files
-checked of total, how many are waiting, what's being decoded right now, and the damaged
-files with ffmpeg's first error. `waiting` means paused for a running transcode; `idle`,
+checked of total, minor and major counts, how many are waiting, what's being decoded right
+now, and the flagged files (major first) with a severity badge, error counts and ffmpeg's
+messages. `waiting` means paused for a running transcode; `idle`,
 nothing left to check.
 
 **Full speed** (`fileHealthFullSpeed`, a second toggle on the same card; off by default)

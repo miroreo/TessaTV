@@ -180,7 +180,13 @@ export interface PlaybackStatsResponse {
     readonly sizeBytes: number | null;
     readonly bitRate: number | null;
     /** The background decode check; null until the file has been checked. */
-    readonly health: { readonly checkedAt: string; readonly error: string | null } | null;
+    readonly health: {
+      readonly checkedAt: string;
+      readonly error: string | null;
+      readonly severity: "clean" | "minor" | "major";
+      readonly videoErrors: number;
+      readonly audioErrors: number;
+    } | null;
   };
   readonly sourceVideo: {
     readonly codec: string;
@@ -294,9 +300,18 @@ export interface FileHealthStatusResponse {
   } | null;
   readonly total: number;
   readonly clean: number;
-  readonly damaged: number;
+  readonly minor: number;
+  readonly major: number;
   readonly due: number;
-  readonly damagedFiles: readonly { readonly path: string; readonly error: string; readonly checkedAt: string }[];
+  /** Major before minor. */
+  readonly flaggedFiles: readonly {
+    readonly path: string;
+    readonly error: string;
+    readonly severity: "minor" | "major";
+    readonly videoErrors: number;
+    readonly audioErrors: number;
+    readonly checkedAt: string;
+  }[];
 }
 
 /** `PATCH /api/settings`'s `jellyfin`. Omitting `apiKey` keeps the saved one. */

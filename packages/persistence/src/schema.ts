@@ -208,6 +208,9 @@ export const fileHealth = pgTable("file_health", {
   checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
   sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
   error: text("error"),
+  severity: text("severity", { enum: ["clean", "minor", "major"] }).notNull().default("clean"),
+  videoErrors: integer("video_errors").notNull().default(0),
+  audioErrors: integer("audio_errors").notNull().default(0),
 });
 
 /** Folders the scheduled library scan imports from — see `LibraryFolder`. */

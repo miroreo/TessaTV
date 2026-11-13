@@ -1,7 +1,9 @@
 import type { FileHealth, FileHealthRepository } from "@tessatv/domain";
 import { describe, expect, it } from "vitest";
-import { checkFileHealth, FileHealthMonitor } from "./file-health.js";
+import { checkFileHealth, FileHealthMonitor, gradeFileHealth, MAJOR_VIDEO_ERROR_LIMIT, type FileHealthFinding } from "./file-health.js";
 import type { CommandRunner } from "./process.js";
+
+const CLEAN: FileHealthFinding = { error: null, severity: "clean", videoErrors: 0, audioErrors: 0 };
 
 describe("checkFileHealth", () => {
   const result = (exitCode: number, stderr = "") => ({ exitCode, stdout: "", stderr });
@@ -18,24 +20,59 @@ describe("checkFileHealth", () => {
     expect(command).not.toContain("-hwaccel");
   });
 
-  it("is damaged when ffmpeg exits non-zero or prints errors, even on a zero exit", async () => {
-    expect(await checkFileHealth("/a", { runner: async () => result(0) })).toBeNull();
-    expect(await checkFileHealth("/a", { runner: async () => result(0, "[hevc] Error constructing the frame RPS.\n") })).toBe(
-      "[hevc] Error constructing the frame RPS.",
-    );
-    expect(await checkFileHealth("/a", { runner: async () => result(183, "[h264] error while decoding MB 4 2\n") })).toBe(
-      "[h264] error while decoding MB 4 2",
-    );
-    expect(await checkFileHealth("/a", { runner: async () => result(1) })).toBe("ffmpeg exited with code 1");
+  it("grades a file by what ffmpeg prints and how it exits", async () => {
+    expect(await checkFileHealth("/a", { runner: async () => result(0) })).toEqual(CLEAN);
+    // A few video errors on a zero exit: concealed by decoders, so minor.
+    expect(await checkFileHealth("/a", { runner: async () => result(0, "[hevc @ 0x1] Error constructing the frame RPS.\n") })).toEqual({
+      error: "[hevc @ 0x1] Error constructing the frame RPS.",
+      severity: "minor",
+      videoErrors: 1,
+      audioErrors: 0,
+    });
+    // A failed decode is major however little it printed.
+    expect(await checkFileHealth("/a", { runner: async () => result(183, "[h264 @ 0x1] error while decoding MB 4 2\n") })).toMatchObject({
+      severity: "major",
+      videoErrors: 1,
+    });
+    expect(await checkFileHealth("/a", { runner: async () => result(1) })).toEqual({
+      error: "ffmpeg exited with code 1",
+      severity: "major",
+      videoErrors: 0,
+      audioErrors: 0,
+    });
   });
 
-  it("ignores non-monotonic dts messages from the null muxer, but still reports real errors after them", async () => {
+  it("calls audio-only errors minor, and counts them apart from the video's", async () => {
+    const audio = "[ac3 @ 0x1] error decoding the audio block\n".repeat(40);
+    expect(await checkFileHealth("/a", { runner: async () => result(0, audio) })).toMatchObject({
+      severity: "minor",
+      videoErrors: 0,
+      audioErrors: 40,
+    });
+    const lines = (name: string, count: number) => `[${name} @ 0x1] bad\n`.repeat(count);
+    expect(gradeFileHealth(0, lines("aac", 3) + lines("h264", MAJOR_VIDEO_ERROR_LIMIT))).toMatchObject({ severity: "minor", audioErrors: 3 });
+    expect(gradeFileHealth(0, lines("h264", MAJOR_VIDEO_ERROR_LIMIT + 1))).toMatchObject({ severity: "major", videoErrors: MAJOR_VIDEO_ERROR_LIMIT + 1 });
+    // Newer ffmpegs name the audio stream and decoder separately; a real file printed 768 of these and played fine.
+    const newer = "[aac @ 0x5875099d8600] channel element 0.0 duplicate\n[aist#0:1/aac @ 0x5875099c2780] [dec:aac @ 0x5875099d7dc0] Error submitting packet to decoder: Invalid data found when processing input\n";
+    expect(gradeFileHealth(0, newer.repeat(384))).toMatchObject({ severity: "minor", videoErrors: 0, audioErrors: 768 });
+    expect(gradeFileHealth(0, "[vist#0:0/h264 @ 0x1] [dec:h264 @ 0x1] Error submitting packet to decoder: Invalid data\n")).toMatchObject({ videoErrors: 1, audioErrors: 0 });
+    // A message with no `[component @ …]` prefix, like ffmpeg's "corrupt decoded frame", is the video's.
+    expect(gradeFileHealth(0, "/media/a.mkv: corrupt decoded frame in stream 0\n")).toMatchObject({ severity: "minor", videoErrors: 1 });
+  });
+
+  it("ignores non-monotonic dts messages from the null muxer, but still grades real errors after them", async () => {
     const dts = "[null @ 0x5b] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 2 >= 2\n".repeat(50);
-    expect(await checkFileHealth("/a", { runner: async () => result(0, dts) })).toBeNull();
-    expect(await checkFileHealth("/a", { runner: async () => result(0, `${dts}[h264] error while decoding MB 4 2\n`) })).toBe(
-      "[h264] error while decoding MB 4 2",
-    );
-    expect(await checkFileHealth("/a", { runner: async () => result(1, dts) })).toBe("ffmpeg exited with code 1");
+    expect(await checkFileHealth("/a", { runner: async () => result(0, dts) })).toEqual(CLEAN);
+    expect(await checkFileHealth("/a", { runner: async () => result(0, `${dts}[h264 @ 0x1] error while decoding MB 4 2\n`) })).toEqual({
+      error: "[h264 @ 0x1] error while decoding MB 4 2",
+      severity: "minor",
+      videoErrors: 1,
+      audioErrors: 0,
+    });
+    expect(await checkFileHealth("/a", { runner: async () => result(1, dts) })).toMatchObject({
+      error: "ffmpeg exited with code 1",
+      severity: "major",
+    });
   });
 
   it("at full speed drops the read-rate throttle and the one-thread limit, but keeps the lowest priority", async () => {
@@ -68,7 +105,7 @@ describe("checkFileHealth", () => {
     expect(seen).toEqual([5, 6]);
   });
 
-  it("stops at the first decode error", async () => {
+  it("reads on past the first decode error, so the errors can be counted", async () => {
     let command: readonly string[] = [];
     await checkFileHealth("/a", {
       runner: async (name, args) => {
@@ -76,11 +113,11 @@ describe("checkFileHealth", () => {
         return result(0);
       },
     });
-    expect(command).toContain("-xerror");
+    expect(command).not.toContain("-xerror");
   });
 
   it("keeps the reported error short", async () => {
-    expect((await checkFileHealth("/a", { runner: async () => result(1, "x".repeat(5000)) }))?.length).toBe(500);
+    expect((await checkFileHealth("/a", { runner: async () => result(1, "x".repeat(5000)) })).error?.length).toBe(500);
   });
 });
 
@@ -95,9 +132,9 @@ class FakeRepository implements FileHealthRepository {
     this.due = this.due.filter((file) => file.id !== health.mediaFileId);
   }
   async summary() {
-    return { total: 0, clean: 0, damaged: 0, due: 0 };
+    return { total: 0, clean: 0, minor: 0, major: 0, due: 0 };
   }
-  async listDamaged() {
+  async listFlagged() {
     return [];
   }
   async listDue(limit: number) {
@@ -122,16 +159,17 @@ describe("FileHealthMonitor", () => {
       repository,
       isEnabled: async () => true,
       isBusy: () => false,
-      check: async (path) => (path.endsWith("2.mkv") ? "bad frame" : null),
+      check: async (path) =>
+        path.endsWith("2.mkv") ? { error: "bad frame", severity: "minor", videoErrors: 1, audioErrors: 0 } : CLEAN,
       exists: async () => true,
       idleMs: 5,
     });
     monitor.start();
     await until(() => repository.saved.length === 2);
     await monitor.stop();
-    expect(repository.saved.map(({ mediaFileId, sizeBytes, error }) => ({ mediaFileId, sizeBytes, error }))).toEqual([
-      { mediaFileId: "1", sizeBytes: 10, error: null },
-      { mediaFileId: "2", sizeBytes: 20, error: "bad frame" },
+    expect(repository.saved.map(({ mediaFileId, sizeBytes, error, severity, videoErrors }) => ({ mediaFileId, sizeBytes, error, severity, videoErrors }))).toEqual([
+      { mediaFileId: "1", sizeBytes: 10, error: null, severity: "clean", videoErrors: 0 },
+      { mediaFileId: "2", sizeBytes: 20, error: "bad frame", severity: "minor", videoErrors: 1 },
     ]);
   });
 
@@ -142,7 +180,7 @@ describe("FileHealthMonitor", () => {
       repository,
       isEnabled: async () => true,
       isBusy: () => busy,
-      check: async () => null,
+      check: async () => CLEAN,
       exists: async () => true,
       busyMs: 5,
       idleMs: 5,
@@ -162,7 +200,7 @@ describe("FileHealthMonitor", () => {
       repository,
       isEnabled: async () => enabled,
       isBusy: () => false,
-      check: async () => null,
+      check: async () => CLEAN,
       exists: async () => true,
       disabledMs: 5,
       idleMs: 5,
@@ -216,7 +254,7 @@ describe("FileHealthMonitor", () => {
       check: (_path, _signal, onProgress) =>
         new Promise((resolve) => {
           report = onProgress;
-          finish = () => resolve(null);
+          finish = () => resolve(CLEAN);
         }),
     });
     monitor.start();
@@ -239,7 +277,7 @@ describe("FileHealthMonitor", () => {
       isBusy: () => true,
       check: async (_path, _signal, _onProgress, fullSpeed) => {
         modes.push(fullSpeed);
-        return null;
+        return CLEAN;
       },
       exists: async () => true,
       duration: async () => null,
@@ -267,7 +305,7 @@ describe("FileHealthMonitor", () => {
       check: (_path, signal, _onProgress, mode) =>
         new Promise((resolve, reject) => {
           started.push(mode);
-          if (mode) resolve(null);
+          if (mode) resolve(CLEAN);
           else signal.addEventListener("abort", () => reject(new Error("aborted")));
         }),
       enabledPollMs: 5,
@@ -288,7 +326,7 @@ describe("FileHealthMonitor", () => {
       repository,
       isEnabled: async () => true,
       isBusy: () => busy,
-      check: async () => null,
+      check: async () => CLEAN,
       exists: async () => true,
       busyMs: 5,
       idleMs: 5,
@@ -313,7 +351,7 @@ describe("FileHealthMonitor", () => {
           attempts += 1;
           throw new Error("ffmpeg missing");
         }
-        return null;
+        return CLEAN;
       },
       exists: async () => true,
       onError: (path) => errors.push(path),
@@ -335,7 +373,7 @@ describe("FileHealthMonitor", () => {
       repository,
       isEnabled: async () => true,
       isBusy: () => false,
-      check: async () => ((checked = true), null),
+      check: async () => ((checked = true), CLEAN),
       exists: async () => false,
       onError: () => undefined,
       idleMs: 5,

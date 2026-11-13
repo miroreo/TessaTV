@@ -14,16 +14,16 @@ export interface FileHealthDependencies {
   readonly status: () => FileHealthMonitorStatus;
 }
 
-const DAMAGED_FILES_SHOWN = 100;
+const FLAGGED_FILES_SHOWN = 100;
 
 /** Progress and findings of the background decode check, for the settings page. Admin-only. */
 export function registerFileHealthRoutes(app: FastifyInstance, deps: FileHealthDependencies): void {
   app.get("/api/file-health", { preHandler: requireAdmin }, async (): Promise<FileHealthStatusResponse> => {
     const staleBefore = new Date(Date.now() - FILE_HEALTH_RECHECK_DAYS * 24 * 60 * 60 * 1000);
-    const [{ fileHealthCheck: enabled, fileHealthFullSpeed: fullSpeed }, summary, damaged] = await Promise.all([
+    const [{ fileHealthCheck: enabled, fileHealthFullSpeed: fullSpeed }, summary, flagged] = await Promise.all([
       deps.settings.get(),
       deps.repository.summary(staleBefore),
-      deps.repository.listDamaged(DAMAGED_FILES_SHOWN),
+      deps.repository.listFlagged(FLAGGED_FILES_SHOWN),
     ]);
     const { state, current } = deps.status();
     return {
@@ -33,7 +33,14 @@ export function registerFileHealthRoutes(app: FastifyInstance, deps: FileHealthD
       state: enabled ? state : "disabled",
       current: enabled && current ? { ...current, startedAt: current.startedAt.toISOString() } : null,
       ...summary,
-      damagedFiles: damaged.map(({ path, error, checkedAt }) => ({ path, error, checkedAt: checkedAt.toISOString() })),
+      flaggedFiles: flagged.map(({ path, error, severity, videoErrors, audioErrors, checkedAt }) => ({
+        path,
+        error,
+        severity,
+        videoErrors,
+        audioErrors,
+        checkedAt: checkedAt.toISOString(),
+      })),
     };
   });
 }
