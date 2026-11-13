@@ -22,6 +22,10 @@ export interface FileHealthCheckOptions {
 const DEFAULT_READ_RATE = 4;
 const DEFAULT_CHECK_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const MAX_ERROR_CHARS = 500;
+// The null output complains about timestamps that MKVs with coarse timebases (e.g. 1/1000 s at 24-60 fps)
+// legitimately repeat, once per frame. Playback is unaffected, and thousands of these lines would
+// otherwise fill the stored message and hide any real decode error behind them.
+const NON_MONOTONIC_DTS = /Application provided invalid, non monotonically increasing dts to muxer/;
 
 /**
  * Decodes the first video and audio streams end to end on the CPU and returns what ffmpeg
@@ -58,7 +62,11 @@ export async function checkFileHealth(path: string, options: FileHealthCheckOpti
   // At `-v error` ffmpeg prints only real errors (warnings, like odd timestamps, are hidden),
   // and exits 0 on plenty of them: a HEVC stream with broken references or a Matroska element
   // overrunning its parent decodes "successfully" with errors logged. So anything printed counts.
-  const messages = result.stderr.trim();
+  const messages = result.stderr
+    .split("\n")
+    .filter((line) => !NON_MONOTONIC_DTS.test(line))
+    .join("\n")
+    .trim();
   if (result.exitCode === 0 && !messages) return null;
   return (messages || `ffmpeg exited with code ${result.exitCode}`).slice(0, MAX_ERROR_CHARS);
 }

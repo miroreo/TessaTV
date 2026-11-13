@@ -29,6 +29,15 @@ describe("checkFileHealth", () => {
     expect(await checkFileHealth("/a", { runner: async () => result(1) })).toBe("ffmpeg exited with code 1");
   });
 
+  it("ignores non-monotonic dts messages from the null muxer, but still reports real errors after them", async () => {
+    const dts = "[null @ 0x5b] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 2 >= 2\n".repeat(50);
+    expect(await checkFileHealth("/a", { runner: async () => result(0, dts) })).toBeNull();
+    expect(await checkFileHealth("/a", { runner: async () => result(0, `${dts}[h264] error while decoding MB 4 2\n`) })).toBe(
+      "[h264] error while decoding MB 4 2",
+    );
+    expect(await checkFileHealth("/a", { runner: async () => result(1, dts) })).toBe("ffmpeg exited with code 1");
+  });
+
   it("at full speed drops the read-rate throttle and the one-thread limit, but keeps the lowest priority", async () => {
     let command: readonly string[] = [];
     const runner: CommandRunner = async (name, args) => {
