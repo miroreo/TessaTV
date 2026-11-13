@@ -36,6 +36,12 @@ const groupName = z
   .transform((value) => value || null)
   .nullable();
 
+const devicePath = z.string().trim().regex(/^\/dev\/[\w./-]+$/, "Must be a device path such as /dev/dri/renderD128");
+const hardwareAccelInput = z.object({
+  enabled: z.boolean(),
+  devices: z.array(devicePath).max(16).refine((devices) => new Set(devices).size === devices.length, "Each device can be listed once"),
+});
+
 const oidcInput = z.object({
   enabled: z.boolean(),
   publicUrl: httpUrl,
@@ -69,6 +75,7 @@ function publicView(settings: ServerSettings): ServerSettingsResponse {
     jellyfin: settings.jellyfin ? { url: settings.jellyfin.url, hasApiKey: settings.jellyfin.apiKeySealed !== "" } : null,
     fileHealthCheck: settings.fileHealthCheck,
     fileHealthFullSpeed: settings.fileHealthFullSpeed,
+    hardwareAccel: settings.hardwareAccel,
   };
 }
 
@@ -86,16 +93,17 @@ export function registerServerSettingsRoutes(server: FastifyInstance, deps: Serv
       ...admin,
       schema: {
         body: z
-          .object({ maxStreamHeight: maxStreamHeight.optional(), oidc: oidcInput.optional(), jellyfin: jellyfinInput.optional(), fileHealthCheck: z.boolean().optional(), fileHealthFullSpeed: z.boolean().optional() })
+          .object({ maxStreamHeight: maxStreamHeight.optional(), oidc: oidcInput.optional(), jellyfin: jellyfinInput.optional(), fileHealthCheck: z.boolean().optional(), fileHealthFullSpeed: z.boolean().optional(), hardwareAccel: hardwareAccelInput.nullable().optional() })
           .strict(),
       },
     },
     async (request, reply) => {
-      const { maxStreamHeight: height, oidc: input, jellyfin: jellyfinChange, fileHealthCheck, fileHealthFullSpeed } = request.body;
+      const { maxStreamHeight: height, oidc: input, jellyfin: jellyfinChange, fileHealthCheck, fileHealthFullSpeed, hardwareAccel } = request.body;
       const changes: { -readonly [K in keyof ServerSettings]?: ServerSettings[K] } = {};
       if (height !== undefined) changes.maxStreamHeight = height;
       if (fileHealthCheck !== undefined) changes.fileHealthCheck = fileHealthCheck;
       if (fileHealthFullSpeed !== undefined) changes.fileHealthFullSpeed = fileHealthFullSpeed;
+      if (hardwareAccel !== undefined) changes.hardwareAccel = hardwareAccel;
       if (input) {
         if (!deps.sso) return reply.code(503).send({ error: "sso_unavailable", message: "Single sign-on isn't available on this server" });
         const saved = (await settings.get()).oidc;

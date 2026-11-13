@@ -39,6 +39,10 @@ export interface VaapiOptions {
 export class VaapiAccel implements HardwareAccel {
   readonly kind = "vaapi";
 
+  get device(): string {
+    return this.capabilities.device;
+  }
+
   get deviceName(): string | null {
     return this.capabilities.deviceName ?? null;
   }

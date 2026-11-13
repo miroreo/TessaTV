@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TranscodeVideoCodec } from "../client-capabilities.js";
@@ -169,4 +169,33 @@ export async function selectHardwareAccel(
     );
   }
   return software;
+}
+
+/** The VAAPI render nodes on this machine (`/dev/dri/renderD*`), in name order. */
+export async function listRenderDevices(directory = "/dev/dri"): Promise<string[]> {
+  try {
+    return (await readdir(directory))
+      .filter((name) => /^renderD\d+$/.test(name))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map((name) => join(directory, name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Tries each device in order and returns the first that can encode, or software when none can.
+ * An empty list means every render node on the machine. A device that fails is skipped, so a
+ * busy or broken first choice never costs the user their GPU entirely.
+ */
+export async function selectHardwareAccelByPriority(
+  devices: readonly string[],
+  options: HardwareAccelOptions & { readonly onSkip?: (device: string) => void } = {},
+): Promise<HardwareAccel> {
+  for (const device of devices.length > 0 ? devices : await listRenderDevices()) {
+    const accel = await selectHardwareAccel("auto", { ...options, vaapiDevice: device });
+    if (accel.kind !== "none") return accel;
+    options.onSkip?.(device);
+  }
+  return new SoftwareAccel();
 }

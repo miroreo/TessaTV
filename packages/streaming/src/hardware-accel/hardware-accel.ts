@@ -37,6 +37,8 @@ export interface VideoPipeline {
  */
 export interface HardwareAccel {
   readonly kind: HardwareAccelKind;
+  /** The device node it runs on (e.g. `/dev/dri/renderD128`); absent for software. */
+  readonly device?: string | null;
   /** The GPU (or, for software, CPU) doing the work, for display. */
   readonly deviceName: string | null;
   videoPipeline(request: VideoEncodeRequest): VideoPipeline;

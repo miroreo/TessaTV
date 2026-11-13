@@ -20,6 +20,8 @@ import exitFullscreen from "heroicons/24/solid/arrows-pointing-in.svg?raw";
 import fullscreen from "heroicons/24/solid/arrows-pointing-out.svg?raw";
 import subtitles from "heroicons/24/solid/chat-bubble-bottom-center-text.svg?raw";
 import search from "heroicons/24/solid/magnifying-glass.svg?raw";
+import up from "heroicons/24/solid/chevron-up.svg?raw";
+import down from "heroicons/24/solid/chevron-down.svg?raw";
 import check from "heroicons/24/solid/check-circle.svg?raw";
 import next from "heroicons/24/solid/forward.svg?raw";
 import pause from "heroicons/24/solid/pause.svg?raw";
@@ -48,6 +50,8 @@ export const icons = {
   exitFullscreen,
   fullscreen,
   subtitles,
+  up,
+  down,
   check,
   search,
   next,

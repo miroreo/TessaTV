@@ -29,6 +29,7 @@ import { type JellyfinImportDependencies, registerJellyfinImportRoutes } from ".
 import { registerOidcRoutes } from "./routes/oidc.js";
 import { registerDiagnosticsRoutes, type DiagnosticsDependencies } from "./routes/diagnostics.js";
 import { registerFileHealthRoutes, type FileHealthDependencies } from "./routes/file-health.js";
+import { registerHardwareAccelRoutes, type HardwareAccelDependencies } from "./routes/hardware-accel.js";
 import { registerServerSettingsRoutes } from "./routes/server-settings.js";
 import { oidcClientConfig, type SsoDependencies } from "./sso.js";
 import { type NodeRequestHandler, registerWebUiRoutes } from "./routes/web-ui.js";
@@ -69,6 +70,7 @@ export interface AppDependencies {
   libraryFolders?: LibraryFolderDependencies;
   /** The background decode check's status page; admin-only, mounted with `auth` and `settings`. */
   fileHealth?: Omit<FileHealthDependencies, "settings">;
+  hardwareAccel?: HardwareAccelDependencies;
   /** Memory diagnostics routes (admin-only, mounted with `auth`); omitted unless enabled. */
   diagnostics?: DiagnosticsDependencies;
   /** SvelteKit's built handler, served at the root for any path no explicit route claims. Omitted when the web app isn't built. */
@@ -129,6 +131,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
     });
     if (deps.jellyfinImport) registerJellyfinImportRoutes(app, deps.jellyfinImport);
     if (deps.fileHealth) registerFileHealthRoutes(app, { ...deps.fileHealth, settings: deps.settings });
+    if (deps.hardwareAccel) registerHardwareAccelRoutes(app, deps.hardwareAccel);
   }
   if (deps.auth && deps.diagnostics) registerDiagnosticsRoutes(app, deps.diagnostics);
 
