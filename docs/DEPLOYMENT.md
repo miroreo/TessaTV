@@ -37,7 +37,9 @@ Environment (validated at startup by `packages/config`; a bad value stops the se
 | `TMDB_API_KEY`, `TVDB_API_KEY` | no | Metadata for movies / shows is disabled until set. |
 | `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD` | no | Subtitle downloads are off until all three are set. Subtitles are written **beside each video**, so the media mount must be writable (see below). |
 | `SUBTITLE_LANGUAGES`, `SUBTITLE_HEARING_IMPAIRED` | no | `en` and `avoid` by default; see `.env.example`. |
-| `HARDWARE_ACCEL` | no | `auto` (default: VAAPI if it works, else software), `none`, `vaapi` (fails startup if VAAPI doesn't work). |
+| `HARDWARE_ACCEL` | no | `auto` (default: NVENC if it works, then VAAPI, else software), `none`, `nvenc`, `vaapi` (the last two fail startup if they don't work). |
+| `NVENC_DEVICE` | no | CUDA device index, as `nvidia-smi` numbers GPUs. Default 0. |
+| `NVENC_HARDWARE_DECODE` | no | `true` (default): NVDEC decodes on the GPU when it supports the source. `false`: the CPU decodes and the GPU only encodes. A transcode the GPU fails is retried on the CPU either way. |
 | `VAAPI_DEVICE` | no | Defaults to `/dev/dri/renderD128`. |
 | `VAAPI_HARDWARE_DECODE` | no | `false` (default): the CPU decodes and the GPU only encodes, because corrupt input can hang a GPU decoder and freeze the machine. `true` decodes on the GPU too (faster for 4K). |
 | `MAX_CONCURRENT_TRANSCODES` | no | Default 3. |
@@ -51,6 +53,13 @@ For VAAPI, pass the render node (`--device /dev/dri/renderD128`) and add the dev
 **by number** (`--group-add $(stat -c %g /dev/dri/renderD128)`): the app isn't root, and
 group names resolve inside the container, where `render` doesn't exist. The startup log
 says `Transcoding with hardware accel: vaapi` when it worked.
+
+For NVENC/NVDEC, the host needs the NVIDIA driver and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+Run with `--gpus all` and `-e NVIDIA_DRIVER_CAPABILITIES=compute,video,utility` (the image sets
+the latter). The startup log says `Transcoding with hardware accel: nvenc`. If it says `none`,
+check `nvidia-smi` works inside the container. AV1 encoding needs an RTX 40-series or newer;
+unsupported codecs are encoded on the CPU. Tone-mapping HDR and burning in subtitles still run on the CPU.
 
 ## Docker Compose (app + its own Postgres)
 

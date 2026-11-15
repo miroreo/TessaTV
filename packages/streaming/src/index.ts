@@ -2,6 +2,7 @@ export * from "./client-capabilities.js";
 export * from "./ffmpeg-args.js";
 export * from "./hardware-accel/detect.js";
 export * from "./hardware-accel/hardware-accel.js";
+export * from "./hardware-accel/nvenc.js";
 export * from "./hardware-accel/software.js";
 export * from "./hardware-accel/vaapi.js";
 export * from "./loudness.js";

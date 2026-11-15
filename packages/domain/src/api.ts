@@ -226,7 +226,7 @@ export interface PlaybackStatsResponse {
       readonly decodeDevice: string | null;
       readonly encode: "gpu" | "cpu";
       readonly encodeDevice: string | null;
-      /** `vaapi`, or `none` for software. */
+      /** `nvenc`, `vaapi`, or `none` for software. */
       readonly accel: string;
     } | null;
     /** Why the GPU failed, when this transcode fell back to the CPU. */

@@ -40,7 +40,7 @@ Repo: https://github.com/miroreo/TessaTV (private).
   library files, no client needed), *then* `jellyfin-compat` on top of a working playback
   engine. **`packages/streaming` is built** (see "Streaming subsystem" below): ffprobe
   probing, `resolvePlaybackPlan`, ffmpeg HLS `TranscodeSession`, and a `HardwareAccel`
-  strategy with `none`/`vaapi` implemented. Live-verified on this machine: ffprobe parses
+  strategy with `none`/`vaapi`/`nvenc` implemented. Live-verified on this machine: ffprobe parses
   2124/2125 real library files (the one failure is a genuinely 0-byte file on disk), and
   remux + software transcode + VAAPI transcode all succeed on a representative sample
   (HEVC 8/10-bit, AV1 10-bit + Opus, Hi10P H.264, XviD AVI, PGS-subtitled BluRay) — VAAPI
@@ -478,7 +478,8 @@ data mid-file, the UVD decoder ring timed out, the driver's GPU reset failed, an
 machine hung — the fallback ladder never got a chance, since nothing in Node was running.
 The CPU decoder just reports an error on the same data.
 
-Config: `HARDWARE_ACCEL` (`auto`/`none`/`vaapi`), `VAAPI_DEVICE`, `VAAPI_HARDWARE_DECODE`, `TRANSCODE_DIR`,
+Config: `HARDWARE_ACCEL` (`auto`/`none`/`vaapi`/`nvenc`), `VAAPI_DEVICE`, `VAAPI_HARDWARE_DECODE`, `NVENC_DEVICE`,
+`NVENC_HARDWARE_DECODE`, `TRANSCODE_DIR`,
 `MAX_CONCURRENT_TRANSCODES`.
 
 **Hardware acceleration setting** (admin Settings page → "Hardware acceleration"):
@@ -495,12 +496,19 @@ render nodes and what's in use. `VAAPI_HARDWARE_DECODE` stays env-only on purpos
 Hardware accel is a `HardwareAccel` strategy whose only job is producing a `VideoPipeline`
 (pre-`-i` args, `-vf` chain, encoder args); stream mapping, keyframe alignment and HLS
 muxing live once in `buildTranscodeArgs` and are shared by every strategy.
-`selectHardwareAccel(mode)` resolves `auto`/`none`/`vaapi`: `auto` silently falls back to
-software, an explicit `vaapi` that doesn't work throws. Adding NVENC/QSV = add to the
+`selectHardwareAccel(mode)` resolves `auto`/`none`/`vaapi`/`nvenc`: `auto` tries NVENC, then VAAPI,
+then silently falls back to software; an explicit `nvenc`/`vaapi` that doesn't work throws. Adding QSV = add to the
 `HardwareAccelKind` union, one new strategy class, and a branch in `selectHardwareAccel`
 — nothing else changes. `VaapiAccel` falls back per request: hardware decode only when
 the GPU supports that codec **and** bit depth, otherwise software decode + `hwupload`;
 target codecs the GPU can't encode are delegated wholesale to the software strategy.
+`NvencAccel` works the same way (`detectNvencCapabilities` probes real NVENC encodes and NVDEC
+decodes), except NVDEC is **on by default** (`NVENC_HARDWARE_DECODE`): no hang on corrupt input
+has been seen on NVIDIA, and the CPU retry covers a failing transcode. NVENC accepts
+system-memory frames, so software-decoded and tone-mapped/burn-in frames need no `hwupload`.
+GPU decode and scaling use `scale_cuda`; an ffmpeg without it just gets CPU decode.
+Not yet verified on real NVIDIA hardware (none on the dev machine): only argument building and
+detection are unit-tested.
 
 `streaming`'s tests include one integration file (`ffmpeg.integration.test.ts`) that runs
 real ffmpeg on a lavfi-synthesized 10-bit HEVC + 5.1 AC-3 sample (remux, software

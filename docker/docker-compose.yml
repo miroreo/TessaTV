@@ -29,6 +29,14 @@ services:
     #   - /dev/dri:/dev/dri
     # group_add:
     #   - "<gid from stat>"
+    # NVIDIA (NVENC/NVDEC) needs the NVIDIA Container Toolkit on the host instead:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu, video, compute, utility]
 
   postgres:
     image: postgres:16

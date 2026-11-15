@@ -56,10 +56,15 @@ describe("loadConfig", () => {
   });
 
   it("defaults transcoding settings, and rejects an unknown hardware accel mode", () => {
-    expect(loadConfig(validEnv)).toMatchObject({ HARDWARE_ACCEL: "auto", MAX_CONCURRENT_TRANSCODES: 3, VAAPI_HARDWARE_DECODE: false });
+    expect(loadConfig(validEnv)).toMatchObject({ HARDWARE_ACCEL: "auto", MAX_CONCURRENT_TRANSCODES: 3, VAAPI_HARDWARE_DECODE: false, NVENC_HARDWARE_DECODE: true, NVENC_DEVICE: 0 });
     expect(loadConfig({ ...validEnv, VAAPI_HARDWARE_DECODE: "true" }).VAAPI_HARDWARE_DECODE).toBe(true);
     expect(loadConfig(validEnv).TRANSCODE_DIR).toMatch(/tessatv-transcodes$/);
-    expect(() => loadConfig({ ...validEnv, HARDWARE_ACCEL: "nvenc" })).toThrow(/HARDWARE_ACCEL/);
+    expect(loadConfig({ ...validEnv, HARDWARE_ACCEL: "nvenc", NVENC_DEVICE: "1", NVENC_HARDWARE_DECODE: "false" })).toMatchObject({
+      HARDWARE_ACCEL: "nvenc",
+      NVENC_DEVICE: 1,
+      NVENC_HARDWARE_DECODE: false,
+    });
+    expect(() => loadConfig({ ...validEnv, HARDWARE_ACCEL: "qsv" })).toThrow(/HARDWARE_ACCEL/);
   });
 
   it("needs all three OpenSubtitles values or none, and defaults the subtitle preferences", () => {
