@@ -346,13 +346,42 @@ describe("selectHardwareAccelByPriority", () => {
 
   it("lists NVIDIA GPUs by index, and none without a driver", async () => {
     const smi: CommandRunner = async () => ({ exitCode: 0, stdout: "0\n1\n", stderr: "" });
-    expect(await listNvidiaDevices(smi)).toEqual(["nvenc:0", "nvenc:1"]);
-    expect(await listNvidiaDevices(async () => ({ exitCode: 9, stdout: "", stderr: "" }))).toEqual([]);
+    expect(await listNvidiaDevices({ runner: smi })).toEqual(["nvenc:0", "nvenc:1"]);
+    expect(await listNvidiaDevices({ runner: async () => ({ exitCode: 9, stdout: "", stderr: "" }) })).toEqual([]);
     expect(
-      await listNvidiaDevices(async () => {
-        throw new Error("spawn nvidia-smi ENOENT");
+      await listNvidiaDevices({
+        runner: async () => {
+          throw new Error("spawn nvidia-smi ENOENT");
+        },
       }),
     ).toEqual([]);
+  });
+
+  describe("with a GPU that never answers", () => {
+    // A wedged GPU leaves the probe process stuck in the driver, so the runner never returns.
+    const calls: { command: string; timeoutMs: number | undefined }[] = [];
+    const hung: CommandRunner = (command, _args, options) => {
+      calls.push({ command, timeoutMs: options?.timeoutMs });
+      return new Promise(() => undefined);
+    };
+
+    it("treats the device as unusable instead of waiting forever, and moves on", async () => {
+      const skipped: string[] = [];
+      const accel = await selectHardwareAccelByPriority([join(directory, first!)], {
+        runner: hung,
+        probeTimeoutMs: 20,
+        onSkip: (device) => skipped.push(device),
+      });
+      expect(accel.kind).toBe("none");
+      expect(skipped).toEqual([join(directory, first!)]);
+      expect(calls[0]).toMatchObject({ command: "ffmpeg", timeoutMs: 20 });
+    });
+
+    it("gives up on `nvidia-smi` and on a capability probe too", async () => {
+      expect(await listNvidiaDevices({ runner: hung, probeTimeoutMs: 20 })).toEqual([]);
+      expect(await detectNvencCapabilities({ runner: hung, probeTimeoutMs: 20 })).toBeNull();
+      expect(await detectVaapiCapabilities({ runner: hung, probeTimeoutMs: 20 })).toBeNull();
+    });
   });
 
   it("lists render nodes in name order, ignoring other entries", async () => {
