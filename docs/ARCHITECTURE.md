@@ -481,6 +481,17 @@ The CPU decoder just reports an error on the same data.
 Config: `HARDWARE_ACCEL` (`auto`/`none`/`vaapi`), `VAAPI_DEVICE`, `VAAPI_HARDWARE_DECODE`, `TRANSCODE_DIR`,
 `MAX_CONCURRENT_TRANSCODES`.
 
+**Hardware acceleration setting** (admin Settings page → "Hardware acceleration"):
+`ServerSettings.hardwareAccel` is `{ enabled, devices }` — an on/off switch and VAAPI render
+nodes in priority order. `selectHardwareAccelByPriority` probes them in order and uses the first
+that can encode (an empty list means every `/dev/dri/renderD*`); none working means the CPU.
+While the setting is unset (`null`), the `HARDWARE_ACCEL` / `VAAPI_DEVICE` env variables apply as
+before, including failing startup on an explicit `vaapi` that doesn't work; once saved, the setting
+wins. `HardwareAccelResolver` (`apps/server/src/hardware-accel.ts`) re-reads it at the start of
+every transcode (`TranscodeManager`'s `accel` may be a function) and caches the probe result until
+the setting changes, so a change applies from the next video. `GET /api/hardware-accel` lists the
+render nodes and what's in use. `VAAPI_HARDWARE_DECODE` stays env-only on purpose (see above).
+
 Hardware accel is a `HardwareAccel` strategy whose only job is producing a `VideoPipeline`
 (pre-`-i` args, `-vf` chain, encoder args); stream mapping, keyframe alignment and HLS
 muxing live once in `buildTranscodeArgs` and are shared by every strategy.

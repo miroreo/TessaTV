@@ -20,6 +20,7 @@ import {
   DrizzleWatchProgressRepository,
   runMigrations,
 } from "@tessatv/persistence";
+import { HardwareAccelResolver } from "./hardware-accel.js";
 import { FileHealthMonitor, measureMissingLoudness, selectHardwareAccel, TranscodeManager } from "@tessatv/streaming";
 import { buildApp } from "./app.js";
 import { createSubtitleDiscovery, createSubtitleSweep } from "./subtitle-job.js";
@@ -59,16 +60,23 @@ const metadataProviders: MetadataProvidersByKind = {
 };
 
 // Resolved up front so a misconfigured explicit `vaapi` stops startup, not the first playback.
-const hardwareAccel = await selectHardwareAccel(config.HARDWARE_ACCEL, {
+// This is what applies until an admin saves a hardware acceleration setting.
+const environmentAccel = await selectHardwareAccel(config.HARDWARE_ACCEL, {
   ...(config.VAAPI_DEVICE ? { vaapiDevice: config.VAAPI_DEVICE } : {}),
   vaapiHardwareDecode: config.VAAPI_HARDWARE_DECODE,
 });
+const hardwareAccel = new HardwareAccelResolver({
+  settings: serverSettings,
+  environmentDefault: environmentAccel,
+  probe: { vaapiHardwareDecode: config.VAAPI_HARDWARE_DECODE },
+  onSkippedDevice: (device) => app.log.warn({ device }, "hardware acceleration device unusable; trying the next one"),
+});
 const transcodes = new TranscodeManager({
   directory: config.TRANSCODE_DIR,
-  accel: hardwareAccel,
+  accel: () => hardwareAccel.current(),
   maxConcurrent: config.MAX_CONCURRENT_TRANSCODES,
   onFallback: (error, plan) =>
-    app.log.warn({ error: error.message, path: plan.path }, `${hardwareAccel.kind} transcode failed; retrying on the CPU`),
+    app.log.warn({ error: error.message, path: plan.path }, "hardware transcode failed; retrying on the CPU"),
 });
 
 const availability = new DrizzleMediaAvailabilityRepository(db);
@@ -111,6 +119,7 @@ const app = buildApp({
   },
   libraryFolders: { folders: libraryFolders, scanner },
   fileHealth: { repository: fileHealthRepository, status: () => fileHealth.status() },
+  hardwareAccel: { current: () => hardwareAccel.current(), listDevices: () => hardwareAccel.listDevices() },
   ...(diagnostics ? { diagnostics: { diagnostics } } : {}),
   settings: serverSettings,
   users,
@@ -232,7 +241,7 @@ app
     if (!webUiHandler) app.log.warn("Web UI build not found — run `pnpm --filter @tessatv/web build`; the UI will 404 until then");
     if (!tmdbProvider) app.log.warn("TMDB_API_KEY not set — movie metadata routes will return 503 until it is configured");
     if (!tvdbProvider) app.log.warn("TVDB_API_KEY not set — series metadata routes will return 503 until it is configured");
-    app.log.info(`Transcoding with hardware accel: ${hardwareAccel.kind}`);
+    app.log.info(`Transcoding with hardware accel: ${(await hardwareAccel.current()).kind}`);
     await transcodes.start();
     await jobs.start();
     fileHealth.start();

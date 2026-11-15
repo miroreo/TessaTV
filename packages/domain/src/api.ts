@@ -287,6 +287,15 @@ export interface ServerSettingsResponse {
   readonly jellyfin: { readonly url: string; readonly hasApiKey: boolean } | null;
   readonly fileHealthCheck: boolean;
   readonly fileHealthFullSpeed: boolean;
+  readonly hardwareAccel: { readonly enabled: boolean; readonly devices: readonly string[] } | null;
+}
+
+/** `GET /api/hardware-accel` (admins only): what the settings page offers, and what is in use. */
+export interface HardwareAccelStatusResponse {
+  /** Render nodes found on this machine. */
+  readonly availableDevices: readonly string[];
+  /** What transcodes use right now: `none` is the CPU. */
+  readonly active: { readonly kind: string; readonly device: string | null; readonly deviceName: string | null };
 }
 
 /** `GET /api/file-health` (admins only): the background decode check, for the settings page. */

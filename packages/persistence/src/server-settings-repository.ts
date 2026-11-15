@@ -1,6 +1,7 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   MAX_STREAM_HEIGHTS,
+  type HardwareAccelSettings,
   type JellyfinImportSettings,
   type OidcSettings,
   type ServerSettings,
@@ -18,7 +19,15 @@ const PARSERS: { [K in keyof ServerSettings]: (value: unknown) => ServerSettings
   jellyfin: (value) => (value === null ? null : parseJellyfin(value)),
   fileHealthCheck: (value) => (typeof value === "boolean" ? value : undefined),
   fileHealthFullSpeed: (value) => (typeof value === "boolean" ? value : undefined),
+  hardwareAccel: (value) => (value === null ? null : parseHardwareAccel(value)),
 };
+
+function parseHardwareAccel(value: unknown): HardwareAccelSettings | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { enabled, devices } = value as Record<string, unknown>;
+  if (typeof enabled !== "boolean" || !Array.isArray(devices) || !devices.every((device) => typeof device === "string")) return undefined;
+  return { enabled, devices: devices as string[] };
+}
 
 function parseJellyfin(value: unknown): JellyfinImportSettings | undefined {
   if (typeof value !== "object" || value === null) return undefined;

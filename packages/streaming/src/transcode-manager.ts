@@ -35,7 +35,8 @@ export interface ManagedTranscode {
 export interface TranscodeManagerOptions {
   /** Owned by the manager, except that only its own `session-*` directories are ever deleted. */
   readonly directory: string;
-  readonly accel: HardwareAccel;
+  /** Or a function, asked at the start of every transcode, for settings that change while running. */
+  readonly accel: HardwareAccel | (() => Promise<HardwareAccel>);
   readonly maxConcurrent?: number;
   readonly idleTimeoutMs?: number;
   readonly ffmpegPath?: string;
@@ -128,7 +129,8 @@ export class TranscodeManager {
     const id = randomUUID();
     // Level 2 skips the GPU outright, since the previous levels may have failed on it; level 3
     // lowers the resolution instead, and tries it again (see `FallbackLevel`).
-    const initial = plan.fallbackLevel === 2 ? (this.fallback ?? this.options.accel) : this.options.accel;
+    const configured = typeof this.options.accel === "function" ? await this.options.accel() : this.options.accel;
+    const initial = plan.fallbackLevel === 2 ? (this.fallback ?? configured) : configured;
     const { session, accel, hardwareError } = await this.launch(id, 0, plan, startTimeSeconds, initial);
     const entry: Entry = {
       id,

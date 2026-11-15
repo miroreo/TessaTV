@@ -31,6 +31,17 @@ export interface JellyfinImportSettings {
   readonly apiKeySealed: string;
 }
 
+/** Hardware video acceleration, chosen on the settings page. */
+export interface HardwareAccelSettings {
+  readonly enabled: boolean;
+  /**
+   * VAAPI render nodes (e.g. `/dev/dri/renderD128`), most wanted first: the first one that
+   * works is used. Empty means every render node the machine has, in name order. When none
+   * works, transcodes run on the CPU.
+   */
+  readonly devices: readonly string[];
+}
+
 /** Server-wide settings an admin changes on the settings page. */
 export interface ServerSettings {
   /**
@@ -53,6 +64,8 @@ export interface ServerSettings {
    * library, then switching back; it doesn't switch itself off.
    */
   readonly fileHealthFullSpeed: boolean;
+  /** Null until an admin chooses: the `HARDWARE_ACCEL` / `VAAPI_DEVICE` environment variables apply. */
+  readonly hardwareAccel: HardwareAccelSettings | null;
 }
 
-export const DEFAULT_SERVER_SETTINGS: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false };
+export const DEFAULT_SERVER_SETTINGS: ServerSettings = { maxStreamHeight: null, oidc: null, jellyfin: null, fileHealthCheck: true, fileHealthFullSpeed: false, hardwareAccel: null };

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CommandRunner } from "../process.js";
 import { videoStream } from "../test-fixtures.js";
-import { detectVaapiCapabilities, parseVaapiDriverName, selectHardwareAccel } from "./detect.js";
+import { detectVaapiCapabilities, listRenderDevices, parseVaapiDriverName, selectHardwareAccel, selectHardwareAccelByPriority } from "./detect.js";
 import type { VideoEncodeRequest } from "./hardware-accel.js";
 import { SoftwareAccel } from "./software.js";
 import { VaapiAccel, type VaapiCapabilities } from "./vaapi.js";
@@ -179,6 +179,46 @@ describe("selectHardwareAccel", () => {
     await expect(selectHardwareAccel("vaapi", { vaapiDevice: fakeDevice, runner: broken })).rejects.toThrow(
       /could not encode/,
     );
+  });
+});
+
+describe("selectHardwareAccelByPriority", () => {
+  let directory: string;
+  const [first, second] = ["renderD128", "renderD129"];
+  /** Only the second device's probes succeed. */
+  const onlySecond: CommandRunner = async (_command, args) => ({
+    exitCode: args.some((arg) => arg.includes(second!)) ? 0 : 1,
+    stdout: "",
+    stderr: "",
+  });
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), "tessatv-accel-priority-"));
+    await Promise.all([first!, second!, "card0"].map((name) => writeFile(join(directory, name), "")));
+  });
+  afterAll(() => rm(directory, { recursive: true, force: true }));
+
+  it("uses the first device in the list that works, skipping ones that fail", async () => {
+    const skipped: string[] = [];
+    const accel = await selectHardwareAccelByPriority([join(directory, first!), join(directory, second!)], { runner: onlySecond, onSkip: (device) => skipped.push(device) });
+    expect(accel).toMatchObject({ kind: "vaapi", device: join(directory, second!) });
+    expect(skipped).toEqual([join(directory, first!)]);
+  });
+
+  it("honours the order: a working first choice wins over a working second", async () => {
+    const working: CommandRunner = async () => ({ exitCode: 0, stdout: "", stderr: "" });
+    const accel = await selectHardwareAccelByPriority([join(directory, second!), join(directory, first!)], { runner: working });
+    expect(accel).toMatchObject({ device: join(directory, second!) });
+  });
+
+  it("falls back to software when no listed device works", async () => {
+    const broken: CommandRunner = async () => ({ exitCode: 1, stdout: "", stderr: "" });
+    expect((await selectHardwareAccelByPriority([join(directory, first!)], { runner: broken })).kind).toBe("none");
+  });
+
+  it("lists render nodes in name order, ignoring other entries", async () => {
+    expect(await listRenderDevices(directory)).toEqual([join(directory, first!), join(directory, second!)]);
+    expect(await listRenderDevices(join(directory, "missing"))).toEqual([]);
   });
 });
 
