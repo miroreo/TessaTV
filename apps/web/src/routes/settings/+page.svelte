@@ -2,6 +2,7 @@
   import {
     MAX_STREAM_HEIGHTS,
     type FileHealthStatusResponse,
+    type HardwareAccelStatusResponse,
     type JellyfinImportResponse,
     type LibraryFolderSummary,
     type LibraryScanStatus,
@@ -140,6 +141,45 @@
     }
   }
 
+  /** Hardware acceleration: on/off and the devices to try, in priority order. Unset follows the server's environment. */
+  let accelEnabled = $state(true);
+  let accelDevices = $state<string[]>([]);
+  let liveHardware = $state<HardwareAccelStatusResponse | null>(null);
+  const hardware = $derived(liveHardware ?? data.hardware);
+  let savingAccel = $state(false);
+  let accelSaved = $state(false);
+  let accelError = $state<string | null>(null);
+  $effect.pre(() => {
+    accelEnabled = data.settings.hardwareAccel?.enabled ?? hardware.active.kind !== "none";
+    accelDevices = [...(data.settings.hardwareAccel?.devices ?? [])];
+  });
+  const unlistedDevices = $derived(hardware.availableDevices.filter((device) => !accelDevices.includes(device)));
+
+  function moveDevice(index: number, by: -1 | 1) {
+    const next = [...accelDevices];
+    [next[index], next[index + by]] = [next[index + by]!, next[index]!];
+    accelDevices = next;
+  }
+
+  async function saveHardwareAccel() {
+    savingAccel = true;
+    accelSaved = false;
+    accelError = null;
+    try {
+      await api<ServerSettingsResponse>(fetch, "/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ hardwareAccel: { enabled: accelEnabled, devices: accelDevices } }),
+      });
+      liveHardware = await api<HardwareAccelStatusResponse>(fetch, "/api/hardware-accel");
+      await invalidateAll();
+      accelSaved = true;
+    } catch (cause) {
+      accelError = (cause as Error).message;
+    } finally {
+      savingAccel = false;
+    }
+  }
+
   /** The SSO form, starting from what's saved (the secret is never sent back, only whether one is set). */
   const savedOidc = $derived(data.settings.oidc);
   let sso = $state({
@@ -270,6 +310,73 @@
       starts.
     </p>
     {#if settingsError}<div class="alert alert-error">{settingsError}</div>{/if}
+  </div>
+</section>
+
+<section class="card bg-base-200 mb-6">
+  <div class="card-body">
+    <h2 class="card-title">Hardware acceleration</h2>
+    <p class="text-sm opacity-70">
+      Lets the GPU encode video when a stream has to be transcoded, which is several times faster than the CPU. If the chosen
+      device fails on a file, that transcode is retried on the CPU. Applies from the next time a video starts.
+    </p>
+    <label class="label cursor-pointer justify-start gap-3">
+      <input type="checkbox" class="toggle toggle-primary" bind:checked={accelEnabled} disabled={savingAccel} />
+      <span class="text-base-content">Use hardware acceleration</span>
+    </label>
+    {#if accelEnabled}
+      <div>
+        <h3 class="mb-1 font-semibold">Devices, in order of preference</h3>
+        <p class="mb-2 text-sm opacity-70">
+          The first one that works is used. {accelDevices.length === 0
+            ? "None are chosen, so every device found is tried in name order."
+            : "If none of these works, transcodes run on the CPU."}
+        </p>
+        {#if accelDevices.length > 0}
+          <ol class="mb-2 flex flex-col gap-2">
+            {#each accelDevices as device, index (device)}
+              <li class="bg-base-100 flex items-center gap-2 rounded-lg p-2">
+                <span class="badge badge-neutral">{index + 1}</span>
+                <code class="grow">{device}</code>
+                {#if !hardware.availableDevices.includes(device)}<span class="badge badge-warning">not found</span>{/if}
+                <button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Move {device} up" disabled={index === 0 || savingAccel} onclick={() => moveDevice(index, -1)}>
+                  <Icon name="up" class="size-4" />
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Move {device} down" disabled={index === accelDevices.length - 1 || savingAccel} onclick={() => moveDevice(index, 1)}>
+                  <Icon name="down" class="size-4" />
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Remove {device}" disabled={savingAccel} onclick={() => (accelDevices = accelDevices.filter((other) => other !== device))}>
+                  <Icon name="close" class="size-4" />
+                </button>
+              </li>
+            {/each}
+          </ol>
+        {/if}
+        {#if unlistedDevices.length > 0}
+          <div class="flex flex-wrap gap-2">
+            {#each unlistedDevices as device (device)}
+              <button type="button" class="btn btn-sm" disabled={savingAccel} onclick={() => (accelDevices = [...accelDevices, device])}>
+                <Icon name="add" class="size-4" /> {device}
+              </button>
+            {/each}
+          </div>
+        {:else if hardware.availableDevices.length === 0}
+          <p class="text-sm opacity-70">No render devices (<code>/dev/dri/renderD*</code>) were found on this machine; in Docker, pass the GPU through.</p>
+        {/if}
+      </div>
+    {/if}
+    <div class="flex flex-wrap items-center gap-3">
+      <button type="button" class="btn btn-primary" onclick={saveHardwareAccel} disabled={savingAccel}>Save</button>
+      {#if savingAccel}
+        <span class="loading loading-spinner loading-sm"></span>
+      {:else if accelSaved}
+        <span class="text-success flex items-center gap-1 text-sm"><Icon name="check" class="size-4" /> Saved</span>
+      {/if}
+      <span class="text-sm opacity-70">
+        In use now: {hardware.active.kind === "none" ? "CPU" : "VAAPI"}{hardware.active.deviceName ? ` — ${hardware.active.deviceName}` : ""}{hardware.active.device ? ` (${hardware.active.device})` : ""}
+      </span>
+    </div>
+    {#if accelError}<div class="alert alert-error">{accelError}</div>{/if}
   </div>
 </section>
 

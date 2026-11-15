@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TranscodeVideoCodec } from "../client-capabilities.js";
@@ -230,19 +230,58 @@ export async function selectHardwareAccel(
     }
   }
 
+  const vaapi = await selectVaapiAccel(options, software);
+  if (vaapi.accel) return vaapi.accel;
+  if (mode === "vaapi") throw new Error(vaapi.error);
+  return software;
+}
+
+/** VAAPI only, never NVENC: `error` says why not when the device is missing or can't encode. */
+async function selectVaapiAccel(
+  options: HardwareAccelOptions,
+  software: HardwareAccel,
+): Promise<{ accel: HardwareAccel; error?: never } | { accel?: never; error: string }> {
   const device = options.vaapiDevice ?? DEFAULT_VAAPI_DEVICE;
   const deviceExists = await access(device).then(
     () => true,
     () => false,
   );
   const capabilities = deviceExists ? await detectVaapiCapabilities({ ...options, vaapiDevice: device }) : null;
-  if (capabilities) return new VaapiAccel(capabilities, software, { hardwareDecode: options.vaapiHardwareDecode === true });
-  if (mode === "vaapi") {
-    throw new Error(
-      deviceExists
-        ? `VAAPI device ${device} could not encode any supported codec`
-        : `VAAPI device ${device} does not exist`,
-    );
+  if (capabilities) {
+    return { accel: new VaapiAccel(capabilities, software, { hardwareDecode: options.vaapiHardwareDecode === true }) };
   }
-  return software;
+  return {
+    error: deviceExists
+      ? `VAAPI device ${device} could not encode any supported codec`
+      : `VAAPI device ${device} does not exist`,
+  };
+}
+
+/** The VAAPI render nodes on this machine (`/dev/dri/renderD*`), in name order. */
+export async function listRenderDevices(directory = "/dev/dri"): Promise<string[]> {
+  try {
+    return (await readdir(directory))
+      .filter((name) => /^renderD\d+$/.test(name))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map((name) => join(directory, name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Tries each device in order and returns the first that can encode, or software when none can.
+ * An empty list means every render node on the machine. A device that fails is skipped, so a
+ * busy or broken first choice never costs the user their GPU entirely.
+ */
+export async function selectHardwareAccelByPriority(
+  devices: readonly string[],
+  options: HardwareAccelOptions & { readonly onSkip?: (device: string) => void } = {},
+): Promise<HardwareAccel> {
+  for (const device of devices.length > 0 ? devices : await listRenderDevices()) {
+    const vaapi = await selectVaapiAccel({ ...options, vaapiDevice: device }, new SoftwareAccel());
+    if (vaapi.accel) return vaapi.accel;
+    options.onSkip?.(device);
+  }
+  return new SoftwareAccel();
 }
