@@ -19,8 +19,12 @@ const envSchema = z.object({
   SUBTITLE_LANGUAGES: z.string().min(1).default("en"),
   // Whether to prefer subtitles for the deaf and hard of hearing (SDH), avoid them, or not care.
   SUBTITLE_HEARING_IMPAIRED: z.enum(["prefer", "avoid", "any"]).default("avoid"),
-  // `auto` falls back to software; an explicit `vaapi` that doesn't work fails startup.
-  HARDWARE_ACCEL: z.enum(["auto", "none", "vaapi"]).default("auto"),
+  // `auto` tries NVENC, then VAAPI, then software; an explicit `nvenc`/`vaapi` that doesn't work fails startup.
+  HARDWARE_ACCEL: z.enum(["auto", "none", "vaapi", "nvenc"]).default("auto"),
+  // CUDA device index, as `nvidia-smi` numbers GPUs.
+  NVENC_DEVICE: z.coerce.number().int().nonnegative().default(0),
+  // On by default: unlike VAAPI, no hang on corrupt input has been seen. A failing GPU transcode retries on the CPU.
+  NVENC_HARDWARE_DECODE: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
   VAAPI_DEVICE: z.string().min(1).optional(),
   // Off by default: a corrupt file can hang the GPU's decoder and freeze the whole machine.
   VAAPI_HARDWARE_DECODE: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),

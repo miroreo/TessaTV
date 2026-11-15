@@ -1,10 +1,16 @@
 import type { TranscodeVideoCodec } from "../client-capabilities.js";
-import { rateControlArgs, SDR_COLOR_ARGS, toneMapFilters, type HardwareAccel, type VideoEncodeRequest, type VideoPipeline } from "./hardware-accel.js";
+import {
+  rateControlArgs,
+  SDR_COLOR_ARGS,
+  supportsDecode,
+  toneMapFilters,
+  type HardwareAccel,
+  type HardwareDecodeSupport,
+  type VideoEncodeRequest,
+  type VideoPipeline,
+} from "./hardware-accel.js";
 
-export interface VaapiDecodeSupport {
-  readonly codec: string;
-  readonly bitDepth: number;
-}
+export type VaapiDecodeSupport = HardwareDecodeSupport;
 
 /** What this particular GPU/driver can do — detected at startup, not assumed per vendor. */
 export interface VaapiCapabilities {
@@ -50,7 +56,7 @@ export class VaapiAccel implements HardwareAccel {
   ) {}
 
   canDecode(codec: string, bitDepth: number): boolean {
-    return this.capabilities.decode.some((entry) => entry.codec === codec && entry.bitDepth === bitDepth);
+    return supportsDecode(this.capabilities.decode, codec, bitDepth);
   }
 
   videoPipeline(request: VideoEncodeRequest): VideoPipeline {

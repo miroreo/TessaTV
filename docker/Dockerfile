@@ -36,6 +36,8 @@ FROM ${NODE_IMAGE} AS runtime
 # ffmpeg/ffprobe for probing and transcoding. VAAPI drivers: Mesa covers AMD (and older
 # Intel), intel-media-va-driver covers Intel Gen8+. Harmless without a GPU: HARDWARE_ACCEL=auto
 # falls back to software. tini reaps ffmpeg children and forwards signals to node.
+# NVENC/NVDEC need no packages here: the NVIDIA Container Toolkit injects the driver libraries
+# at run time, and Debian's ffmpeg loads them via ffnvcodec.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg mesa-va-drivers intel-media-va-driver tini \
   && rm -rf /var/lib/apt/lists/*
@@ -44,6 +46,7 @@ COPY --from=build --chown=node:node /repo ./
 # Transcode scratch space; mount a volume or tmpfs here.
 RUN install -d -o node -g node /transcodes
 ENV NODE_ENV=production \
+    NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
     PORT=8096 \
     TRANSCODE_DIR=/transcodes
 # Runs as the image's unprivileged `node` user (uid 1000) by default; override with

@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CommandRunner } from "../process.js";
 import { videoStream } from "../test-fixtures.js";
-import { detectVaapiCapabilities, parseVaapiDriverName, selectHardwareAccel } from "./detect.js";
+import { detectNvencCapabilities, detectVaapiCapabilities, parseVaapiDriverName, selectHardwareAccel } from "./detect.js";
 import type { VideoEncodeRequest } from "./hardware-accel.js";
+import { NvencAccel, type NvencCapabilities } from "./nvenc.js";
 import { SoftwareAccel } from "./software.js";
 import { VaapiAccel, type VaapiCapabilities } from "./vaapi.js";
 
@@ -83,6 +84,90 @@ describe("VaapiAccel", () => {
   });
 });
 
+const NVENC_CAPABILITIES: NvencCapabilities = {
+  device: 1,
+  encode: ["h264", "hevc"],
+  decode: [
+    { codec: "h264", bitDepth: 8 },
+    { codec: "hevc", bitDepth: 10 },
+  ],
+};
+
+describe("NvencAccel", () => {
+  const accel = new NvencAccel(NVENC_CAPABILITIES, new SoftwareAccel());
+  const hdr = { source: videoStream({ codec: "hevc", bitDepth: 10, isHdr: true }), codec: "h264" as const, width: 1920, height: 1080, bitrate: 8_000_000 };
+
+  it("decodes with NVDEC, scales on the GPU, and encodes with NVENC by default", () => {
+    const pipeline = accel.videoPipeline(request());
+    expect(pipeline).toMatchObject({ decode: "hardware", encode: "hardware" });
+    expect(pipeline.inputArgs).toEqual([
+      "-init_hw_device", "cuda=cu:1", "-hwaccel", "cuda", "-hwaccel_device", "cu", "-hwaccel_output_format", "cuda",
+    ]);
+    expect(pipeline.filters).toEqual(["scale_cuda=w=1280:h=720:format=nv12"]);
+    expect(pipeline.encoderArgs).toEqual(
+      expect.arrayContaining(["-c:v", "h264_nvenc", "-gpu", "1", "-rc", "vbr", "-b:v", "4000000"]),
+    );
+  });
+
+  it("decodes on the CPU when disabled or the codec + bit depth isn't supported, with no upload needed", () => {
+    const disabled = new NvencAccel(NVENC_CAPABILITIES, new SoftwareAccel(), { hardwareDecode: false }).videoPipeline(request());
+    expect(disabled).toMatchObject({ decode: "software", encode: "hardware", inputArgs: [], filters: ["scale=1280:720", "format=nv12"] });
+    expect(accel.videoPipeline(request({ source: videoStream({ bitDepth: 10 }) })).decode).toBe("software");
+  });
+
+  it("tone-maps in software, downloading only frames already scaled on the GPU", () => {
+    const pipeline = accel.videoPipeline(hdr);
+    expect(pipeline.filters.slice(0, 3)).toEqual(["scale_cuda=w=1920:h=1080:format=p010le", "hwdownload", "format=p010le"]);
+    expect(pipeline.filters).toContain("tonemap=tonemap=hable:desat=0");
+    expect(pipeline.postOverlayFilters).toEqual([]);
+    expect(pipeline.encoderArgs).toEqual(expect.arrayContaining(["-color_trc", "bt709"]));
+  });
+
+  it("downloads GPU frames for subtitle burn-in", () => {
+    const pipeline = accel.videoPipeline(request({ burnIn: true }));
+    expect(pipeline.filters).toEqual(["scale_cuda=w=1280:h=720:format=nv12", "hwdownload", "format=nv12"]);
+    expect(pipeline.postOverlayFilters).toEqual(["format=nv12"]);
+  });
+
+  it("delegates a target codec the GPU can't encode to the fallback", () => {
+    expect(accel.videoPipeline(request({ codec: "av1" }))).toMatchObject({ decode: "software", encode: "software" });
+  });
+});
+
+describe("detectNvencCapabilities", () => {
+  function fakeNvidia(encoders: string[], decodableSamples: string[]): CommandRunner {
+    return async (command, args) => {
+      if (command === "nvidia-smi") return { exitCode: 0, stdout: "NVIDIA GeForce RTX 3060\n", stderr: "" };
+      const encoder = args[args.indexOf("-c:v") + 1];
+      const input = args[args.lastIndexOf("-i") + 1] ?? "";
+      let ok: boolean;
+      if (args.includes("-hwaccel")) ok = decodableSamples.some((suffix) => input.endsWith(suffix));
+      else if (encoder?.endsWith("_nvenc")) ok = encoders.includes(encoder);
+      else ok = true;
+      return { exitCode: ok ? 0 : 1, stdout: "", stderr: "" };
+    };
+  }
+
+  it("records what the GPU actually encodes and decodes, and its name", async () => {
+    expect(
+      await detectNvencCapabilities({ nvencDevice: 1, runner: fakeNvidia(["h264_nvenc", "av1_nvenc"], ["/0.mkv"]) }),
+    ).toEqual({
+      device: 1,
+      deviceName: "NVIDIA GeForce RTX 3060",
+      encode: ["h264", "av1"],
+      decode: [{ codec: "h264", bitDepth: 8 }],
+    });
+  });
+
+  it("returns null when nothing encodes or the runner throws", async () => {
+    expect(await detectNvencCapabilities({ runner: fakeNvidia([], ["/0.mkv"]) })).toBeNull();
+    const throwing: CommandRunner = async () => {
+      throw new Error("spawn ffmpeg ENOENT");
+    };
+    expect(await detectNvencCapabilities({ runner: throwing })).toBeNull();
+  });
+});
+
 describe("parseVaapiDriverName", () => {
   it("takes the GPU name out of the driver's description", () => {
     const mesa =
@@ -149,6 +234,9 @@ describe("selectHardwareAccel", () => {
   let fakeDevice: string;
   const working: CommandRunner = async () => ({ exitCode: 0, stdout: "", stderr: "" });
   const broken: CommandRunner = async () => ({ exitCode: 1, stdout: "", stderr: "no" });
+  /** A machine with a working VAAPI device and no NVIDIA GPU. */
+  const vaapiOnly: CommandRunner = async (_command, args) =>
+    args.includes("-gpu") || args.includes("cuda") ? { exitCode: 1, stdout: "", stderr: "no" } : { exitCode: 0, stdout: "", stderr: "" };
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "tessatv-accel-test-"));
@@ -162,14 +250,23 @@ describe("selectHardwareAccel", () => {
   });
 
   it("picks VAAPI under `auto` when the device works", async () => {
-    expect((await selectHardwareAccel("auto", { vaapiDevice: fakeDevice, runner: working })).kind).toBe("vaapi");
+    expect((await selectHardwareAccel("auto", { vaapiDevice: fakeDevice, runner: vaapiOnly })).kind).toBe("vaapi");
   });
 
   it("falls back to software under `auto` when the device is missing or broken", async () => {
-    expect((await selectHardwareAccel("auto", { vaapiDevice: join(directory, "missing"), runner: working })).kind).toBe(
+    expect((await selectHardwareAccel("auto", { vaapiDevice: join(directory, "missing"), runner: vaapiOnly })).kind).toBe(
       "none",
     );
     expect((await selectHardwareAccel("auto", { vaapiDevice: fakeDevice, runner: broken })).kind).toBe("none");
+  });
+
+  it("prefers NVENC over VAAPI under `auto`, and falls through to VAAPI when NVENC fails", async () => {
+    expect((await selectHardwareAccel("auto", { vaapiDevice: fakeDevice, runner: working })).kind).toBe("nvenc");
+    expect((await selectHardwareAccel("auto", { vaapiDevice: fakeDevice, runner: vaapiOnly })).kind).toBe("vaapi");
+  });
+
+  it("fails loudly when `nvenc` is explicitly requested but unusable", async () => {
+    await expect(selectHardwareAccel("nvenc", { runner: broken })).rejects.toThrow(/NVENC/);
   });
 
   it("fails loudly when `vaapi` is explicitly requested but unusable", async () => {

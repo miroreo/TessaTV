@@ -1,8 +1,18 @@
 import type { TranscodeVideoCodec } from "../client-capabilities.js";
 import type { VideoStreamInfo } from "../media-probe.js";
 
-/** Add `"nvenc" | "qsv"` here as strategies are implemented — nothing else keys off this union. */
-export type HardwareAccelKind = "none" | "vaapi";
+/** Add `"qsv"` here as strategies are implemented — nothing else keys off this union. */
+export type HardwareAccelKind = "none" | "vaapi" | "nvenc";
+
+/** A source codec + bit depth a GPU's decoder handled in a real probe. */
+export interface HardwareDecodeSupport {
+  readonly codec: string;
+  readonly bitDepth: number;
+}
+
+export function supportsDecode(support: readonly HardwareDecodeSupport[], codec: string, bitDepth: number): boolean {
+  return support.some((entry) => entry.codec === codec && entry.bitDepth === bitDepth);
+}
 
 export interface VideoEncodeRequest {
   readonly source: VideoStreamInfo;
@@ -33,7 +43,7 @@ export interface VideoPipeline {
 
 /**
  * Hardware-acceleration strategy: the only thing that changes between software, VAAPI, and
- * (later) NVENC/QSV transcodes is the ffmpeg arguments this produces.
+ * NVENC (and later QSV) transcodes is the ffmpeg arguments this produces.
  */
 export interface HardwareAccel {
   readonly kind: HardwareAccelKind;
