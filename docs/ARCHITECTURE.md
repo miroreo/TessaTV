@@ -472,6 +472,13 @@ that transcode stays on the CPU for its later seeks. Remuxes are never retried: 
 use the accel, so the CPU would fail identically. Verified with real ffmpeg against a
 nonexistent render node: playable on the CPU 0.7s later.
 
+**Probes are time-bounded.** Every detection command (ffmpeg probes, `nvidia-smi`) gets 30s
+(`probeTimeoutMs`); past that the device counts as unusable and the next is tried. The wait
+itself gives up, not just the process: on a wedged GPU (amdgpu job timeout, failed reset) the
+probe ffmpeg is stuck inside the driver and ignores the kill, and without this one such probe
+hung startup and the whole Settings page (its `/api/hardware-accel` call never returned).
+The stuck process stays until the host is rebooted.
+
 **GPU decode is opt-in.** VAAPI decodes on the CPU and only encodes on the GPU unless
 `VAAPI_HARDWARE_DECODE=true`. Found on the owner's server (AMD Polaris): ffmpeg hit corrupt
 data mid-file, the UVD decoder ring timed out, the driver's GPU reset failed, and the whole

@@ -20,7 +20,11 @@ export interface HardwareAccelOptions {
   /** Let NVENC decode on the GPU too (NVDEC). On unless `false`. */
   readonly nvencHardwareDecode?: boolean;
   readonly runner?: CommandRunner;
+  /** How long one probe command may take before the device counts as unusable. Default 30s. */
+  readonly probeTimeoutMs?: number;
 }
+
+export const DEFAULT_PROBE_TIMEOUT_MS = 30_000;
 
 export const DEFAULT_VAAPI_DEVICE = "/dev/dri/renderD128";
 
@@ -50,6 +54,29 @@ const DECODE_SAMPLES: readonly (HardwareDecodeSupport & { encoder: string; pixel
   { codec: "mpeg2video", bitDepth: 8, encoder: "mpeg2video", pixelFormat: "yuv420p" },
   { codec: "mpeg4", bitDepth: 8, encoder: "mpeg4", pixelFormat: "yuv420p" },
 ];
+
+/**
+ * Wraps a runner so a command that never returns rejects after `timeoutMs`. The runner's own
+ * timeout isn't enough: on a wedged GPU the process sits uninterruptibly inside the driver and
+ * ignores the kill, so the wait itself has to give up. Without this, one hung probe stalls
+ * startup and every request that needs the device list.
+ */
+function withTimeout(run: CommandRunner, timeoutMs: number): CommandRunner {
+  return (command, args, options) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`${command} did not finish within ${timeoutMs}ms`)), timeoutMs);
+    });
+    const attempt = Promise.resolve().then(() => run(command, args, { ...options, timeoutMs }));
+    // The loser of the race may still reject later; nobody is waiting on it by then.
+    attempt.catch(() => undefined);
+    return Promise.race([attempt, timedOut]).finally(() => clearTimeout(timer));
+  };
+}
+
+function probeRunner(options: HardwareAccelOptions): CommandRunner {
+  return withTimeout(options.runner ?? runCommand, options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
+}
 
 function commandSucceeds(ffmpeg: string, run: CommandRunner) {
   return async (args: string[]): Promise<boolean> => {
@@ -110,7 +137,7 @@ async function probeDecodeSupport(
  */
 export async function detectVaapiCapabilities(options: HardwareAccelOptions = {}): Promise<VaapiCapabilities | null> {
   const ffmpeg = options.ffmpegPath ?? "ffmpeg";
-  const run = options.runner ?? runCommand;
+  const run = probeRunner(options);
   const device = options.vaapiDevice ?? DEFAULT_VAAPI_DEVICE;
   const deviceArgs = ["-init_hw_device", `vaapi=va:${device}`];
   const succeeds = commandSucceeds(ffmpeg, run);
@@ -171,7 +198,7 @@ async function vaapiDeviceName(ffmpeg: string, device: string, run: CommandRunne
  */
 export async function detectNvencCapabilities(options: HardwareAccelOptions = {}): Promise<NvencCapabilities | null> {
   const ffmpeg = options.ffmpegPath ?? "ffmpeg";
-  const run = options.runner ?? runCommand;
+  const run = probeRunner(options);
   const device = options.nvencDevice ?? 0;
   const succeeds = commandSucceeds(ffmpeg, run);
 
@@ -276,9 +303,9 @@ export async function listRenderDevices(directory = "/dev/dri"): Promise<string[
 }
 
 /** NVIDIA GPUs on this machine as `nvenc:N` ids; empty when there's no driver or `nvidia-smi`. */
-export async function listNvidiaDevices(runner: CommandRunner = runCommand): Promise<string[]> {
+export async function listNvidiaDevices(options: Pick<HardwareAccelOptions, "runner" | "probeTimeoutMs"> = {}): Promise<string[]> {
   try {
-    const { exitCode, stdout } = await runner("nvidia-smi", ["--query-gpu=index", "--format=csv,noheader"]);
+    const { exitCode, stdout } = await probeRunner(options)("nvidia-smi", ["--query-gpu=index", "--format=csv,noheader"]);
     if (exitCode !== 0) return [];
     return stdout
       .split("\n")
@@ -291,8 +318,8 @@ export async function listNvidiaDevices(runner: CommandRunner = runCommand): Pro
 }
 
 /** Everything the device list can offer, in the order `auto` tries them: NVIDIA GPUs, then render nodes. */
-export async function listHardwareAccelDevices(runner?: CommandRunner): Promise<string[]> {
-  return [...(await listNvidiaDevices(runner)), ...(await listRenderDevices())];
+export async function listHardwareAccelDevices(options: Pick<HardwareAccelOptions, "runner" | "probeTimeoutMs"> = {}): Promise<string[]> {
+  return [...(await listNvidiaDevices(options)), ...(await listRenderDevices())];
 }
 
 /**
@@ -306,7 +333,7 @@ export async function selectHardwareAccelByPriority(
   options: HardwareAccelOptions & { readonly onSkip?: (device: string) => void } = {},
 ): Promise<HardwareAccel> {
   const software = new SoftwareAccel();
-  for (const device of devices.length > 0 ? devices : await listHardwareAccelDevices(options.runner)) {
+  for (const device of devices.length > 0 ? devices : await listHardwareAccelDevices(options)) {
     const nvencIndex = parseNvencDeviceId(device);
     const found =
       nvencIndex === null
