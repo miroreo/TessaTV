@@ -35,9 +35,10 @@ export interface JellyfinImportSettings {
 export interface HardwareAccelSettings {
   readonly enabled: boolean;
   /**
-   * VAAPI render nodes (e.g. `/dev/dri/renderD128`), most wanted first: the first one that
-   * works is used. Empty means every render node the machine has, in name order. When none
-   * works, transcodes run on the CPU.
+   * Devices, most wanted first: the first one that works is used. Each is a VAAPI render node
+   * (e.g. `/dev/dri/renderD128`) or an NVIDIA GPU for NVENC (`nvenc:0`, by `nvidia-smi` index).
+   * Empty means every device the machine has: NVIDIA GPUs, then render nodes. When none works,
+   * transcodes run on the CPU.
    */
   readonly devices: readonly string[];
 }

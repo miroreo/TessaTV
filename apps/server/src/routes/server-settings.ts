@@ -36,7 +36,10 @@ const groupName = z
   .transform((value) => value || null)
   .nullable();
 
-const devicePath = z.string().trim().regex(/^\/dev\/[\w./-]+$/, "Must be a device path such as /dev/dri/renderD128");
+const devicePath = z
+  .string()
+  .trim()
+  .regex(/^(\/dev\/[\w./-]+|nvenc:\d+)$/, "Must be a device path such as /dev/dri/renderD128, or an NVIDIA GPU such as nvenc:0");
 const hardwareAccelInput = z.object({
   enabled: z.boolean(),
   devices: z.array(devicePath).max(16).refine((devices) => new Set(devices).size === devices.length, "Each device can be listed once"),

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { TranscodeVideoCodec } from "../client-capabilities.js";
 import { runCommand, type CommandRunner } from "../process.js";
 import type { HardwareAccel, HardwareAccelKind, HardwareDecodeSupport } from "./hardware-accel.js";
-import { NvencAccel, type NvencCapabilities } from "./nvenc.js";
+import { NvencAccel, nvencDeviceId, parseNvencDeviceId, type NvencCapabilities } from "./nvenc.js";
 import { SoftwareAccel } from "./software.js";
 import { VaapiAccel, type VaapiCapabilities } from "./vaapi.js";
 
@@ -223,8 +223,8 @@ export async function selectHardwareAccel(
   if (mode === "none") return software;
 
   if (mode === "auto" || mode === "nvenc") {
-    const capabilities = await detectNvencCapabilities(options);
-    if (capabilities) return new NvencAccel(capabilities, software, { hardwareDecode: options.nvencHardwareDecode !== false });
+    const nvenc = await selectNvencAccel(options, software);
+    if (nvenc) return nvenc;
     if (mode === "nvenc") {
       throw new Error(`NVIDIA GPU ${options.nvencDevice ?? 0} could not encode any supported codec with NVENC`);
     }
@@ -234,6 +234,12 @@ export async function selectHardwareAccel(
   if (vaapi.accel) return vaapi.accel;
   if (mode === "vaapi") throw new Error(vaapi.error);
   return software;
+}
+
+/** NVENC only: null when the GPU can't encode anything. */
+async function selectNvencAccel(options: HardwareAccelOptions, software: HardwareAccel): Promise<HardwareAccel | null> {
+  const capabilities = await detectNvencCapabilities(options);
+  return capabilities ? new NvencAccel(capabilities, software, { hardwareDecode: options.nvencHardwareDecode !== false }) : null;
 }
 
 /** VAAPI only, never NVENC: `error` says why not when the device is missing or can't encode. */
@@ -269,19 +275,45 @@ export async function listRenderDevices(directory = "/dev/dri"): Promise<string[
   }
 }
 
+/** NVIDIA GPUs on this machine as `nvenc:N` ids; empty when there's no driver or `nvidia-smi`. */
+export async function listNvidiaDevices(runner: CommandRunner = runCommand): Promise<string[]> {
+  try {
+    const { exitCode, stdout } = await runner("nvidia-smi", ["--query-gpu=index", "--format=csv,noheader"]);
+    if (exitCode !== 0) return [];
+    return stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => /^\d+$/.test(line))
+      .map((line) => nvencDeviceId(Number(line)));
+  } catch {
+    return [];
+  }
+}
+
+/** Everything the device list can offer, in the order `auto` tries them: NVIDIA GPUs, then render nodes. */
+export async function listHardwareAccelDevices(runner?: CommandRunner): Promise<string[]> {
+  return [...(await listNvidiaDevices(runner)), ...(await listRenderDevices())];
+}
+
 /**
  * Tries each device in order and returns the first that can encode, or software when none can.
- * An empty list means every render node on the machine. A device that fails is skipped, so a
- * busy or broken first choice never costs the user their GPU entirely.
+ * A device is an `nvenc:N` GPU or a VAAPI render node. An empty list means every device on the
+ * machine (`listHardwareAccelDevices`). A device that fails is skipped, so a busy or broken
+ * first choice never costs the user their GPU entirely.
  */
 export async function selectHardwareAccelByPriority(
   devices: readonly string[],
   options: HardwareAccelOptions & { readonly onSkip?: (device: string) => void } = {},
 ): Promise<HardwareAccel> {
-  for (const device of devices.length > 0 ? devices : await listRenderDevices()) {
-    const vaapi = await selectVaapiAccel({ ...options, vaapiDevice: device }, new SoftwareAccel());
-    if (vaapi.accel) return vaapi.accel;
+  const software = new SoftwareAccel();
+  for (const device of devices.length > 0 ? devices : await listHardwareAccelDevices(options.runner)) {
+    const nvencIndex = parseNvencDeviceId(device);
+    const found =
+      nvencIndex === null
+        ? (await selectVaapiAccel({ ...options, vaapiDevice: device }, software)).accel
+        : await selectNvencAccel({ ...options, nvencDevice: nvencIndex }, software);
+    if (found) return found;
     options.onSkip?.(device);
   }
-  return new SoftwareAccel();
+  return software;
 }

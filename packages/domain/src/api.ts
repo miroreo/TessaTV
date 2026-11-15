@@ -292,7 +292,7 @@ export interface ServerSettingsResponse {
 
 /** `GET /api/hardware-accel` (admins only): what the settings page offers, and what is in use. */
 export interface HardwareAccelStatusResponse {
-  /** Render nodes found on this machine. */
+  /** Devices found on this machine: NVIDIA GPUs as `nvenc:N`, and VAAPI render nodes. */
   readonly availableDevices: readonly string[];
   /** What transcodes use right now: `none` is the CPU. */
   readonly active: { readonly kind: string; readonly device: string | null; readonly deviceName: string | null };
