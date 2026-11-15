@@ -361,7 +361,9 @@
             {/each}
           </div>
         {:else if hardware.availableDevices.length === 0}
-          <p class="text-sm opacity-70">No render devices (<code>/dev/dri/renderD*</code>) were found on this machine; in Docker, pass the GPU through.</p>
+          <p class="text-sm opacity-70">
+            No NVIDIA GPU (<code>nvidia-smi</code>) or render device (<code>/dev/dri/renderD*</code>) was found on this machine; in Docker, pass the GPU through.
+          </p>
         {/if}
       </div>
     {/if}
@@ -373,7 +375,7 @@
         <span class="text-success flex items-center gap-1 text-sm"><Icon name="check" class="size-4" /> Saved</span>
       {/if}
       <span class="text-sm opacity-70">
-        In use now: {hardware.active.kind === "none" ? "CPU" : "VAAPI"}{hardware.active.deviceName ? ` — ${hardware.active.deviceName}` : ""}{hardware.active.device ? ` (${hardware.active.device})` : ""}
+        In use now: {hardware.active.kind === "none" ? "CPU" : hardware.active.kind.toUpperCase()}{hardware.active.deviceName ? ` — ${hardware.active.deviceName}` : ""}{hardware.active.device ? ` (${hardware.active.device})` : ""}
       </span>
     </div>
     {#if accelError}<div class="alert alert-error">{accelError}</div>{/if}

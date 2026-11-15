@@ -70,7 +70,7 @@ const environmentAccel = await selectHardwareAccel(config.HARDWARE_ACCEL, {
 const hardwareAccel = new HardwareAccelResolver({
   settings: serverSettings,
   environmentDefault: environmentAccel,
-  probe: { vaapiHardwareDecode: config.VAAPI_HARDWARE_DECODE },
+  probe: { vaapiHardwareDecode: config.VAAPI_HARDWARE_DECODE, nvencHardwareDecode: config.NVENC_HARDWARE_DECODE },
   onSkippedDevice: (device) => app.log.warn({ device }, "hardware acceleration device unusable; trying the next one"),
 });
 const transcodes = new TranscodeManager({

@@ -414,11 +414,12 @@ describe("browse, playback and progress routes", () => {
   });
 
   it("saves the hardware acceleration setting and rejects a malformed device", async () => {
-    const hardwareAccel = { enabled: true, devices: ["/dev/dri/renderD129", "/dev/dri/renderD128"] };
+    const hardwareAccel = { enabled: true, devices: ["nvenc:0", "/dev/dri/renderD129", "/dev/dri/renderD128"] };
     const patched = await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { hardwareAccel } });
     expect(patched.json()).toMatchObject({ hardwareAccel });
     const bad = (devices: string[]) => app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { hardwareAccel: { enabled: true, devices } } });
     expect((await bad(["renderD128"])).statusCode).toBe(400);
+    expect((await bad(["nvenc:"])).statusCode).toBe(400);
     expect((await bad(["/dev/dri/renderD128", "/dev/dri/renderD128"])).statusCode).toBe(400);
     // null goes back to following the HARDWARE_ACCEL / VAAPI_DEVICE environment variables.
     expect((await app.inject({ method: "PATCH", url: "/api/settings", headers, payload: { hardwareAccel: null } })).json()).toMatchObject({ hardwareAccel: null });

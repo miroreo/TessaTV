@@ -1,5 +1,5 @@
 import type { HardwareAccelSettings, ServerSettingsRepository } from "@tessatv/domain";
-import { listRenderDevices, selectHardwareAccelByPriority, SoftwareAccel, type HardwareAccel, type HardwareAccelOptions } from "@tessatv/streaming";
+import { listHardwareAccelDevices, selectHardwareAccelByPriority, SoftwareAccel, type HardwareAccel, type HardwareAccelOptions } from "@tessatv/streaming";
 
 export interface HardwareAccelResolverOptions {
   readonly settings: ServerSettingsRepository;
@@ -27,7 +27,7 @@ export class HardwareAccelResolver {
   }
 
   listDevices(): Promise<string[]> {
-    return listRenderDevices();
+    return listHardwareAccelDevices();
   }
 
   private resolve(setting: HardwareAccelSettings | null): Promise<HardwareAccel> {

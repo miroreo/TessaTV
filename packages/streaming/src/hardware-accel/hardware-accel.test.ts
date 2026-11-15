@@ -7,6 +7,7 @@ import { videoStream } from "../test-fixtures.js";
 import {
   detectNvencCapabilities,
   detectVaapiCapabilities,
+  listNvidiaDevices,
   listRenderDevices,
   parseVaapiDriverName,
   selectHardwareAccel,
@@ -323,6 +324,35 @@ describe("selectHardwareAccelByPriority", () => {
   it("falls back to software when no listed device works", async () => {
     const broken: CommandRunner = async () => ({ exitCode: 1, stdout: "", stderr: "" });
     expect((await selectHardwareAccelByPriority([join(directory, first!)], { runner: broken })).kind).toBe("none");
+  });
+
+  it("tries an NVIDIA GPU as `nvenc:N`, and skips it for the next device when it fails", async () => {
+    const noNvidia: CommandRunner = async (_command, args) => ({
+      exitCode: args.includes("-gpu") || args.includes("cuda") ? 1 : 0,
+      stdout: "",
+      stderr: "",
+    });
+    const working: CommandRunner = async () => ({ exitCode: 0, stdout: "", stderr: "" });
+    const skipped: string[] = [];
+    expect(await selectHardwareAccelByPriority(["nvenc:1", join(directory, first!)], { runner: working })).toMatchObject({
+      kind: "nvenc",
+      device: "nvenc:1",
+    });
+    expect(
+      await selectHardwareAccelByPriority(["nvenc:0", join(directory, first!)], { runner: noNvidia, onSkip: (device) => skipped.push(device) }),
+    ).toMatchObject({ kind: "vaapi", device: join(directory, first!) });
+    expect(skipped).toEqual(["nvenc:0"]);
+  });
+
+  it("lists NVIDIA GPUs by index, and none without a driver", async () => {
+    const smi: CommandRunner = async () => ({ exitCode: 0, stdout: "0\n1\n", stderr: "" });
+    expect(await listNvidiaDevices(smi)).toEqual(["nvenc:0", "nvenc:1"]);
+    expect(await listNvidiaDevices(async () => ({ exitCode: 9, stdout: "", stderr: "" }))).toEqual([]);
+    expect(
+      await listNvidiaDevices(async () => {
+        throw new Error("spawn nvidia-smi ENOENT");
+      }),
+    ).toEqual([]);
   });
 
   it("lists render nodes in name order, ignoring other entries", async () => {

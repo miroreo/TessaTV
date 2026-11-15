@@ -26,6 +26,17 @@ const ENCODERS: Record<TranscodeVideoCodec, readonly string[]> = {
   av1: ["-c:v", "av1_nvenc"],
 };
 
+/** How an NVIDIA GPU is named in the device list, next to VAAPI's `/dev/dri/renderD128`. */
+export function nvencDeviceId(index: number): string {
+  return `nvenc:${index}`;
+}
+
+/** The CUDA index in a device id from `nvencDeviceId`, or null for anything else (e.g. a render node). */
+export function parseNvencDeviceId(id: string): number | null {
+  const index = /^nvenc:(\d+)$/.exec(id)?.[1];
+  return index === undefined ? null : Number(index);
+}
+
 export interface NvencOptions {
   /** Decode on the GPU (NVDEC) when it supports the source. On unless disabled. */
   readonly hardwareDecode?: boolean;
@@ -39,6 +50,10 @@ export interface NvencOptions {
  */
 export class NvencAccel implements HardwareAccel {
   readonly kind = "nvenc";
+
+  get device(): string {
+    return nvencDeviceId(this.capabilities.device);
+  }
 
   get deviceName(): string | null {
     return this.capabilities.deviceName ?? null;
