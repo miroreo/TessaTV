@@ -131,6 +131,17 @@ describe("auth routes", () => {
     expect(again.json().error).toBe("setup_already_completed");
   });
 
+  it("marks the session cookie Secure when a proxy says the browser used HTTPS", async () => {
+    const app = buildTestApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/setup",
+      payload: ADMIN,
+      headers: { "x-forwarded-proto": "https" },
+    });
+    expect(String(response.headers["set-cookie"]).split("; ")).toContain("Secure");
+  });
+
   it("rejects malformed and weak setup input", async () => {
     const app = buildTestApp();
     const malformed = await app.inject({ method: "POST", url: "/api/auth/setup", payload: { username: "tessa" } });

@@ -771,7 +771,7 @@ ports; `persistence` implements them (`app_user` — `user` is reserved in Postg
 (deny-by-default, matched case-insensitively since routing is), except `GET
 /api/auth/session` (needs-setup + current user, what the UI routes on), `POST
 /api/auth/setup`, `/login`, `/logout`. The browser gets the token as an HttpOnly,
-SameSite=Lax cookie via `@fastify/cookie` (`Secure` only over HTTPS — the LAN setup is plain HTTP); other
+SameSite=Lax cookie via `@fastify/cookie` (`Secure` only over HTTPS — the LAN setup is plain HTTP; the server trusts `X-Forwarded-Proto`, so behind Caddy it is `Secure`); other
 clients send `Authorization: Bearer <token>` (the login/setup responses also return it).
 Non-`/api` routes (`/health`, Jellyfin discovery, the UI itself) stay public. The UI's
 root layout load sends people to `/setup`, `/login`, or the app based on
