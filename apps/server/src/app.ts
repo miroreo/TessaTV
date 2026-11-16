@@ -80,7 +80,9 @@ export interface AppDependencies {
 export function buildApp(deps: AppDependencies): FastifyInstance {
   // Case-insensitive routing is required by Jellyfin clients (see registerJellyfinCompat);
   // it applies router-wide, so TessaTV's own /api routes match case-insensitively too.
-  const app = Fastify({ logger: true, routerOptions: { caseSensitive: false } });
+  // `trustProxy`: behind a TLS-terminating proxy (Caddy) the app only sees plain HTTP; trusting
+  // X-Forwarded-* makes `request.protocol` reflect the browser's HTTPS, so the session cookie gets `Secure`.
+  const app = Fastify({ logger: true, trustProxy: true, routerOptions: { caseSensitive: false } });
 
   // Routes declare zod schemas; a request that fails one gets a uniform 400.
   app.setValidatorCompiler(validatorCompiler);
