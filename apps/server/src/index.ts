@@ -77,6 +77,7 @@ const transcodes = new TranscodeManager({
   directory: config.TRANSCODE_DIR,
   accel: () => hardwareAccel.current(),
   maxConcurrent: config.MAX_CONCURRENT_TRANSCODES,
+  onEvent: (message, fields) => app.log.info(fields, message),
   onFallback: (error, plan) =>
     app.log.warn({ error: error.message, path: plan.path }, "hardware transcode failed; retrying on the CPU"),
 });

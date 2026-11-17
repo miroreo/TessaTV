@@ -5,7 +5,7 @@ import { videoPipelineFor } from "./ffmpeg-args.js";
 import type { HardwareAccel, HardwareAccelKind, VideoPipeline } from "./hardware-accel/hardware-accel.js";
 import { cpuModel, SoftwareAccel } from "./hardware-accel/software.js";
 import type { HlsPlaybackPlan } from "./playback-plan.js";
-import { startTranscodeSession, type TranscodeSession } from "./transcode-session.js";
+import { startTranscodeSession, type TranscodeEventSink, type TranscodeSession } from "./transcode-session.js";
 
 /** Thrown when starting a transcode would exceed `maxConcurrent`; maps naturally to a 503. */
 export class TranscodeCapacityError extends Error {
@@ -50,6 +50,11 @@ export interface TranscodeManagerOptions {
   readonly fallbackAccel?: HardwareAccel | null;
   /** Called when a transcode falls back, e.g. to log why the GPU path failed. */
   readonly onFallback?: (error: Error, plan: HlsPlaybackPlan) => void;
+  /**
+   * Called with timings and ffmpeg facts at each step of a start (plan, command line, first
+   * playlist, first progress, exit), for working out where a slow start spent its time.
+   */
+  readonly onEvent?: TranscodeEventSink;
   /** Test seams. */
   readonly startSession?: typeof startTranscodeSession;
   readonly now?: () => number;
@@ -168,6 +173,12 @@ export class TranscodeManager {
     const transcodedUntil = entry.startTimeSeconds + entry.session.progress.outTimeSeconds;
     if (seconds >= entry.startTimeSeconds && seconds <= transcodedUntil) return view(entry);
 
+    this.options.onEvent?.("transcode seek restarting ffmpeg", {
+      transcodeId: id,
+      seconds,
+      startTimeSeconds: entry.startTimeSeconds,
+      transcodedUntilSeconds: transcodedUntil,
+    });
     await entry.session.dispose();
     entry.generation += 1;
     let launched;
@@ -236,18 +247,34 @@ export class TranscodeManager {
     accel: HardwareAccel,
   ): Promise<{ session: TranscodeSession; accel: HardwareAccel; hardwareError: string | null }> {
     const fallback = this.fallback;
+    const launchedAtMs = this.now();
+    const emit = this.eventSink(id, generation);
+    emit("transcode launching", {
+      path: plan.path,
+      mode: plan.mode,
+      fallbackLevel: plan.fallbackLevel,
+      video: plan.video?.kind ?? null,
+      audio: plan.audio?.kind ?? null,
+      segmentContainer: plan.segmentContainer,
+      accel: accel.kind,
+      accelDevice: accel.deviceName,
+      startTimeSeconds,
+    });
     const session = await this.spawn(id, generation, plan, startTimeSeconds, accel);
     try {
       await session.waitForPlaylist(this.options.playlistTimeoutMs ?? 60_000);
+      emit("transcode playlist ready", { afterMs: this.now() - launchedAtMs, accel: accel.kind });
       return { session, accel, hardwareError: null };
     } catch (error) {
       await session.dispose();
       // Only a video re-encode uses the accel; a remux failing on the CPU would fail again.
       if (!fallback || accel.kind === fallback.kind || plan.video?.kind !== "transcode") throw error;
       this.options.onFallback?.(error as Error, plan);
+      emit("transcode falling back", { afterMs: this.now() - launchedAtMs, from: accel.kind, to: fallback.kind });
       const retry = await this.spawn(id, generation, plan, startTimeSeconds, fallback);
       try {
         await retry.waitForPlaylist(this.options.playlistTimeoutMs ?? 60_000);
+        emit("transcode playlist ready", { afterMs: this.now() - launchedAtMs, accel: fallback.kind });
       } catch (retryError) {
         await retry.dispose();
         throw retryError;
@@ -263,6 +290,12 @@ export class TranscodeManager {
       startTimeSeconds,
       ...(this.options.ffmpegPath ? { ffmpegPath: this.options.ffmpegPath } : {}),
       ...(this.options.segmentSeconds ? { segmentSeconds: this.options.segmentSeconds } : {}),
+      ...(this.options.onEvent ? { onEvent: this.eventSink(id, generation) } : {}),
     });
+  }
+
+  /** Tags every event with which transcode and ffmpeg run it came from. */
+  private eventSink(id: string, generation: number): TranscodeEventSink {
+    return (message, fields) => this.options.onEvent?.(message, { transcodeId: id, generation, ...fields });
   }
 }

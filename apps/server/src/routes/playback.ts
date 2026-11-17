@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import send from "@fastify/send";
 import {
@@ -514,7 +514,21 @@ export function registerPlaybackRoutes(server: FastifyInstance, deps: PlaybackDe
       if (!HLS_FILE.test(request.params.file)) return reply.code(404).send({ error: "not_found" });
       // The playlist grows as ffmpeg works; segments never change once listed.
       const cacheControl = request.params.file.endsWith(".m3u8") ? "no-cache" : "private, max-age=3600";
-      return sendFile(request, reply, `${transcode.session.outputDirectory}/${request.params.file}`, cacheControl);
+      const path = `${transcode.session.outputDirectory}/${request.params.file}`;
+      // Size and age at request time show whether a segment the client aborted was still being written.
+      const bytes = await stat(path).then((info) => info.size, () => null);
+      request.log.info(
+        {
+          transcodeId: request.params.id,
+          file: request.params.file,
+          bytes,
+          sessionAgeMs: Date.now() - transcode.session.startedAtMs,
+          ffmpeg: transcode.session.state,
+          outTimeSeconds: transcode.session.progress.outTimeSeconds,
+        },
+        "transcode file requested",
+      );
+      return sendFile(request, reply, path, cacheControl);
     },
   );
 

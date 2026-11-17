@@ -162,6 +162,26 @@ describe("TranscodeManager", () => {
       });
     }
 
+    it("reports each step of a start, tagged with the transcode, including the fallback", async () => {
+      failingFirst();
+      const events: { message: string; fields: Record<string, unknown> }[] = [];
+      const transcodes = new TranscodeManager({
+        directory, accel: gpu, onEvent: (message, fields) => events.push({ message, fields }),
+        startSession: startSession as unknown as typeof startTranscodeSession,
+      });
+      const transcode = await transcodes.begin(TRANSCODE_PLAN, 120);
+      expect(events.map((event) => event.message)).toEqual([
+        "transcode launching", "transcode falling back", "transcode playlist ready",
+      ]);
+      expect(events[0]!.fields).toMatchObject({
+        transcodeId: transcode.id, generation: 0, mode: "transcode", accel: "vaapi", startTimeSeconds: 120,
+      });
+      expect(events[2]!.fields).toMatchObject({ accel: "none", afterMs: expect.any(Number) });
+
+      await transcodes.seek(transcode.id, 500);
+      expect(events.at(-3)!.message).toBe("transcode seek restarting ffmpeg");
+    });
+
     it("retries a failed hardware transcode on the CPU, and keeps the CPU for later seeks", async () => {
       failingFirst();
       const onFallback = vi.fn();
