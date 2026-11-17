@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SoftwareAccel } from "./hardware-accel/software.js";
 import type { HlsPlaybackPlan } from "./playback-plan.js";
 import type { ProcessSpawner, SpawnedProcess } from "./process.js";
-import { startTranscodeSession } from "./transcode-session.js";
+import { startTranscodeSession, type TranscodeEventSink } from "./transcode-session.js";
 
 class FakeProcess extends EventEmitter implements SpawnedProcess {
   readonly stdout = new PassThrough();
@@ -55,7 +55,7 @@ describe("TranscodeSession", () => {
   });
   afterEach(() => rm(root, { recursive: true, force: true }));
 
-  const start = (overrides: { killTimeoutMs?: number } = {}) =>
+  const start = (overrides: { killTimeoutMs?: number; onEvent?: TranscodeEventSink } = {}) =>
     startTranscodeSession(PLAN, {
       accel: new SoftwareAccel(),
       directory: join(root, "out"),
@@ -95,6 +95,22 @@ describe("TranscodeSession", () => {
 
     expect(seen).toEqual([1.5, 1.5, 3]);
     expect(session.progress).toEqual({ outTimeSeconds: 3, speed: null });
+  });
+
+  it("reports the command, first progress and exit with timings", async () => {
+    const events: { message: string; fields: Record<string, unknown> }[] = [];
+    const session = await start({ onEvent: (message, fields) => events.push({ message, fields }) });
+    fake.stdout.write("out_time_us=2000000\nspeed=3x\nprogress=continue\nout_time_us=4000000\nspeed=3x\nprogress=continue\n");
+    await new Promise((resolve) => setImmediate(resolve));
+    fake.stderr.write("[hevc] warning\n");
+    await new Promise((resolve) => setImmediate(resolve));
+    fake.exit(0);
+    await session.done;
+
+    expect(events.map((event) => event.message)).toEqual(["ffmpeg spawned", "ffmpeg first progress", "ffmpeg exited"]);
+    expect(events[0]!.fields.command).toMatch(/^\/bin\/ffmpeg .*index\.m3u8$/);
+    expect(events[1]!.fields).toMatchObject({ outTimeSeconds: 2, speed: 3, afterMs: expect.any(Number) });
+    expect(events[2]!.fields).toMatchObject({ state: "completed", outTimeSeconds: 4, stderr: "[hevc] warning" });
   });
 
   it("completes on exit code 0", async () => {

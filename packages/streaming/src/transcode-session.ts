@@ -28,7 +28,12 @@ export interface TranscodeSessionOptions extends HlsOutputOptions {
   readonly spawner?: ProcessSpawner;
   /** How long `stop()` waits after SIGTERM before SIGKILL. */
   readonly killTimeoutMs?: number;
+  /** Timing and exit facts for diagnosing slow starts; the manager adds which transcode it is. */
+  readonly onEvent?: TranscodeEventSink;
 }
+
+/** Receives a short message and structured fields, e.g. to hand to a logger. */
+export type TranscodeEventSink = (message: string, fields: Record<string, unknown>) => void;
 
 const STDERR_TAIL_BYTES = 4096;
 
@@ -45,14 +50,22 @@ export class TranscodeSession {
   private readonly progressListeners = new Set<(progress: TranscodeProgress) => void>();
   private stopRequested = false;
   private stderrTail = "";
+  private sawProgress = false;
+  /** When ffmpeg was spawned, for measuring how long a start takes. */
+  readonly startedAtMs = Date.now();
 
   constructor(
     private readonly process: SpawnedProcess,
     readonly outputDirectory: string,
     private readonly killTimeoutMs: number,
+    private readonly onEvent: TranscodeEventSink = () => {},
   ) {
     this.playlistPath = join(outputDirectory, PLAYLIST_FILENAME);
     const progress = new FfmpegProgressParser(({ outTimeSeconds, speed }) => {
+      if (!this.sawProgress) {
+        this.sawProgress = true;
+        this.onEvent("ffmpeg first progress", { afterMs: Date.now() - this.startedAtMs, outTimeSeconds, speed });
+      }
       this.latestProgress = { outTimeSeconds, speed };
       for (const listener of this.progressListeners) listener(this.latestProgress);
     });
@@ -68,6 +81,12 @@ export class TranscodeSession {
         if (this.currentState !== "running") return;
         this.currentState = state;
         this.finalResult = { state, error };
+        this.onEvent("ffmpeg exited", {
+          state,
+          afterMs: Date.now() - this.startedAtMs,
+          outTimeSeconds: this.latestProgress.outTimeSeconds,
+          stderr: this.stderrTail.trim() || null,
+        });
         resolve(this.finalResult);
       };
       this.process.on("error", (error) => finish("failed", error.message));
@@ -152,5 +171,7 @@ export async function startTranscodeSession(
   await mkdir(options.directory, { recursive: true });
   const args = buildTranscodeArgs(plan, options.accel, options);
   const spawner = options.spawner ?? spawnProcess;
-  return new TranscodeSession(spawner(options.ffmpegPath ?? "ffmpeg", args), options.directory, options.killTimeoutMs ?? 5_000);
+  const ffmpeg = options.ffmpegPath ?? "ffmpeg";
+  options.onEvent?.("ffmpeg spawned", { command: [ffmpeg, ...args].join(" ") });
+  return new TranscodeSession(spawner(ffmpeg, args), options.directory, options.killTimeoutMs ?? 5_000, options.onEvent);
 }

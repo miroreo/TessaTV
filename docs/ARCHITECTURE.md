@@ -479,6 +479,14 @@ probe ffmpeg is stuck inside the driver and ignores the kill, and without this o
 hung startup and the whole Settings page (its `/api/hardware-accel` call never returned).
 The stuck process stays until the host is rebooted.
 
+**Slow starts are traceable.** `TranscodeManager`'s `onEvent` (wired to the server log) reports
+each step of a start, tagged with `transcodeId` and the ffmpeg run's `generation`: `transcode
+launching` (plan, accel, start offset), `ffmpeg spawned` (the full command line), `ffmpeg first
+progress`, `transcode playlist ready` (`afterMs` since launch), `transcode falling back`, `ffmpeg
+exited` (with its stderr), and `transcode seek restarting ffmpeg`. Every request for a transcode
+file also logs `transcode file requested` with the file's size on disk and the run's age, so a
+segment a client aborts can be told apart from one that was still being written.
+
 **GPU decode is opt-in.** VAAPI decodes on the CPU and only encodes on the GPU unless
 `VAAPI_HARDWARE_DECODE=true`. Found on the owner's server (AMD Polaris): ffmpeg hit corrupt
 data mid-file, the UVD decoder ring timed out, the driver's GPU reset failed, and the whole
